@@ -6,7 +6,7 @@
   "scripts": {
     "start": "NODE_ENV=production node src/server.js"
   },
-  "dependencies": {googleapis
+  "dependencies": {googleapis}
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
