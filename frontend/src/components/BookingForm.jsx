@@ -19,7 +19,32 @@ export default function BookingForm({ onCreated }){
     <form className='space-y-4' onSubmit={submit}>
       <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
         <div><label>Date</label><input type='date' value={date} onChange={e=>setDate(e.target.value)} /></div>
-        <div><label>Time</label><select value={slot?`${slot.start}-${slot.end}`:''} onChange={e=>{const[a,b]=e.target.value.split('-');setSlot({start:a,end:b})}}><option value=''>Select time</option>{slots.map((s,i)=><option key={i} value={`${s.start}-${s.end}`}>{s.start} - {s.end}</option>)}</select></div>
+        <div><label>Time</label><select
+  value={slot ? `${slot.start}-${slot.end}` : ''}
+  onChange={e => {
+    const val = e.target.value
+    if (!val) return setSlot(null)
+    const [s, t] = val.split('-')
+    const chosen = slots.find(x => x.start === s && x.end === t)
+    if (!chosen?.enabled) return // ignore picks on disabled options
+    setSlot({ start: s, end: t })
+  }}
+>
+  <option value="">Select time</option>
+  {slots
+    .slice()
+    .sort((a,b) => a.start.localeCompare(b.start))
+    .map((s, i) => (
+      <option
+        key={i}
+        value={`${s.start}-${s.end}`}
+        disabled={!s.enabled}
+      >
+        {s.start} - {s.end}{!s.enabled ? ' (Not available)' : ''}
+      </option>
+    ))}
+</select>
+
         <div><label>Full name</label><input value={full_name} onChange={e=>setFullName(e.target.value)} required/></div>
         <div><label>Phone</label><input value={phone} onChange={e=>setPhone(e.target.value)} required/></div>
         <div><label>Email address</label><input type='email' value={email} onChange={e=>setEmail(e.target.value)} required/></div>
