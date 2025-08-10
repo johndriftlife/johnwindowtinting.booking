@@ -3,7 +3,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        brand: "#200000",
+        brand: "#0a0a0a",
         accent: "#402000",
         action: "#202000"
       }
