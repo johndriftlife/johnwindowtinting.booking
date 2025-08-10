@@ -6,7 +6,7 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar']
 function getJwtClient() {
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
   let privateKey = process.env.GOOGLE_PRIVATE_KEY || ''
-  // Render-safe: turn \n sequences back into newlines
+  // turn \n sequences back into real newlines (Render-safe)
   privateKey = privateKey.replace(/\\n/g, '\n')
 
   if (!clientEmail || !privateKey) {
@@ -21,8 +21,10 @@ function getJwtClient() {
 }
 
 /**
- * Create a calendar event. Returns event id.
- * booking: { id, full_name, phone, email, vehicle, tint_quality, tint_shades_json, date, start_time, end_time, amount_total, amount_deposit }
+ * Creates a Calendar event. Returns event id.
+ * Expects booking with: id, full_name, phone, email, vehicle,
+ * tint_quality, tint_shades_json, date, start_time, end_time,
+ * amount_total, amount_deposit
  */
 export async function createCalendarEvent(booking) {
   const calendarId = process.env.GOOGLE_CALENDAR_ID
