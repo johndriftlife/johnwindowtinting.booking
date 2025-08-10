@@ -1,89 +1,131 @@
+// backend/src/routes/payments.js
 import express from 'express'
 import Stripe from 'stripe'
-import { db } from '../store.js'
 import dotenv from 'dotenv'
+import { db, saveBookings } from '../store.mjs' // <-- IMPORTANT: .mjs extension
 
 dotenv.config()
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 const router = express.Router()
+const stripeKey = process.env.STRIPE_SECRET_KEY || ''
+const stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' })
 
-// Create a Stripe Checkout session
+function getFrontendBase(req) {
+  const envUrl = process.env.FRONTEND_URL || process.env.PUBLIC_FRONTEND_URL || ''
+  const origin = req.headers.origin
+  return envUrl || origin || ''
+}
+
+// Create a Stripe Checkout session (50% deposit)
 router.post('/checkout', async (req, res) => {
   try {
-    const { booking_id } = req.body
-    if (!booking_id) {
-      return res.status(400).json({ error: 'Missing booking_id' })
+    if (!stripeKey) {
+      return res.status(500).json({ error: 'STRIPE_SECRET_KEY is not set' })
     }
 
-    // Find booking
-    const booking = db.bookings.find(b => b.id === booking_id)
-    if (!booking) {
-      return res.status(404).json({ error: 'Booking not found' })
+    const { booking_id } = req.body || {}
+    if (!booking_id) return res.status(400).json({ error: 'Missing booking_id' })
+
+    const b = db.bookings.find(x => x.id === booking_id)
+    if (!b) return res.status(404).json({ error: 'Booking not found' })
+
+    const amountCents = Number(b.amount_deposit || 0)
+    if (!amountCents || amountCents < 50) {
+      return res.status(400).json({ error: 'Deposit amount invalid' })
     }
 
-    // Calculate deposit amount (50%)
-    const values = {
-      carbon: { front_doors: 4000, rear_doors: 4000, front_windshield: 8000, rear_windshield: 8000 },
-      ceramic: { front_doors: 6000, rear_doors: 6000, front_windshield: 10000, rear_windshield: 10000 }
+    const base = getFrontendBase(req)
+    if (!base) {
+      return res.status(500).json({ error: 'Set FRONTEND_URL (or PUBLIC_FRONTEND_URL) in env' })
     }
 
-    const amount_total = booking.windows.reduce((sum, w) => sum + (values[booking.tint_quality][w] || 0), 0)
-    const amount_deposit = Math.floor(amount_total * 0.5)
+    const successUrl = `${base}/?status=success&b=${encodeURIComponent(b.id)}`
+    const cancelUrl  = `${base}/?status=cancelled&b=${encodeURIComponent(b.id)}`
 
-    // Create Checkout session
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
-      payment_method_types: ['card'],
+      currency: 'eur',
       line_items: [
         {
           price_data: {
             currency: 'eur',
             product_data: {
-              name: `Booking Deposit – ${booking.full_name}`,
-              description: `Date: ${booking.date} Time: ${booking.start_time}`
+              name: `Deposit for booking #${b.id}`,
+              description: `Date ${b.date} • ${b.start_time}-${b.end_time}`
             },
-            unit_amount: amount_deposit
+            unit_amount: amountCents
           },
           quantity: 1
         }
       ],
-      success_url: `${process.env.FRONTEND_URL}/success?booking_id=${booking.id}`,
-      cancel_url: `${process.env.FRONTEND_URL}/cancel?booking_id=${booking.id}`,
-      metadata: { booking_id: booking.id }
+      metadata: { booking_id: b.id },
+      success_url: successUrl,
+      cancel_url: cancelUrl
     })
 
+    if (!session?.url) {
+      return res.status(500).json({ error: 'Stripe did not return a Checkout URL' })
+    }
+
     res.json({ url: session.url })
-  } catch (err) {
-    console.error('Checkout error:', err)
-    res.status(500).json({ error: 'Payment failed to start' })
+  } catch (e) {
+    const msg = e?.raw?.message || e?.message || 'Stripe checkout error'
+    console.error('Checkout error:', msg)
+    res.status(500).json({ error: msg })
   }
 })
 
-// Stripe webhook for payment confirmation
-router.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
-  const sig = req.headers['stripe-signature']
-  let event
-
+// Stripe webhook (MUST be raw body)
+router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET)
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message)
-    return res.status(400).send(`Webhook Error: ${err.message}`)
-  }
-
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object
-    const booking_id = session.metadata?.booking_id
-    if (booking_id) {
-      const booking = db.bookings.find(b => b.id === booking_id)
-      if (booking) {
-        booking.payment_status = 'paid'
-      }
+    const sig = req.headers['stripe-signature']
+    const whSecret = process.env.STRIPE_WEBHOOK_SECRET
+    if (!whSecret) {
+      console.error('Missing STRIPE_WEBHOOK_SECRET')
+      return res.status(500).send('Webhook not configured')
     }
-  }
+    const event = stripe.webhooks.constructEvent(req.body, sig, whSecret)
 
-  res.json({ received: true })
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const cs = event.data.object
+        const booking_id = cs.metadata?.booking_id
+        const payment_intent_id = cs.payment_intent || cs.id
+        if (booking_id) {
+          // mark paid; if you use finalize service + calendar, call it here
+          const b = db.bookings.find(x => x.id === booking_id)
+          if (b) {
+            b.payment_status = 'paid'
+            b.payment_intent_id = payment_intent_id
+            b.status = 'deposit_paid'
+            await saveBookings()
+          }
+        }
+        break
+      }
+      case 'payment_intent.succeeded': {
+        const pi = event.data.object
+        const booking_id = pi.metadata?.booking_id
+        if (booking_id) {
+          const b = db.bookings.find(x => x.id === booking_id)
+          if (b) {
+            b.payment_status = 'paid'
+            b.payment_intent_id = pi.id
+            b.status = 'deposit_paid'
+            await saveBookings()
+          }
+        }
+        break
+      }
+      default:
+        break
+    }
+
+    res.json({ received: true })
+  } catch (err) {
+    console.error('Webhook handler error:', err?.message || err)
+    res.status(400).send('Webhook error')
+  }
 })
 
 export default router
