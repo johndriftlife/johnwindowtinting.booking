@@ -4,7 +4,7 @@ import logo from '../assets/logo.png'
 
 const API = import.meta.env.VITE_API_BASE
 
-// Labels (shown to users)
+// Labels shown to users
 const PRICE_LABELS = {
   carbon: {
     front_doors: 'Front Doors €40',
@@ -20,20 +20,10 @@ const PRICE_LABELS = {
   }
 }
 
-// Values (in cents)
+// Values in cents
 const PRICE_VALUES = {
-  carbon: {
-    front_doors: 4000,
-    rear_doors: 4000,
-    front_windshield: 8000,
-    rear_windshield: 8000
-  },
-  ceramic: {
-    front_doors: 6000,
-    rear_doors: 6000,
-    front_windshield: 10000,
-    rear_windshield: 10000
-  }
+  carbon: { front_doors: 4000, rear_doors: 4000, front_windshield: 8000, rear_windshield: 8000 },
+  ceramic:{ front_doors: 6000, rear_doors: 6000, front_windshield:10000, rear_windshield:10000 }
 }
 
 export default function BookingForm({ onCreated }) {
@@ -48,11 +38,11 @@ export default function BookingForm({ onCreated }) {
 
   const [tint_quality, setQuality] = useState('carbon')
   const [availableShades, setAvailableShades] = useState([])
-  const [tint_shades, setTintShades] = useState([]) // multi-select via checkboxes
+  const [tint_shades, setTintShades] = useState([]) // checkbox multi-select
 
   const [windows, setWindows] = useState([])
 
-  // Fetch availability when a date is selected
+  // Load availability for a chosen date
   useEffect(() => {
     if (!date) return
     axios
@@ -64,7 +54,7 @@ export default function BookingForm({ onCreated }) {
       .catch(() => setSlots([]))
   }, [date])
 
-  // Fetch shade availability from backend and default/fallback lists
+  // Load shade availability, fall back to defaults
   useEffect(() => {
     let cancelled = false
     axios
@@ -77,26 +67,20 @@ export default function BookingForm({ onCreated }) {
         if (cancelled) return
         if (list.length) {
           setAvailableShades(list)
-          // keep only still-available selections
           setTintShades(prev => prev.filter(s => list.includes(s)))
-          if (list.length && !list.some(s => tint_shades.includes(s))) {
-            setTintShades([list[0]])
-          }
+          if (!list.some(s => tint_shades.includes(s))) setTintShades([list[0]])
         } else {
-          // fallback defaults
-          const fb = tint_quality === 'carbon' ? ['50%', '35%', '20%', '5%', '1%'] : ['20%', '5%']
+          const fb = tint_quality === 'carbon' ? ['50%','35%','20%','5%','1%'] : ['20%','5%']
           setAvailableShades(fb)
           setTintShades(prev => (prev.length ? prev.filter(s => fb.includes(s)) : [fb[0]]))
         }
       })
       .catch(() => {
-        const fb = tint_quality === 'carbon' ? ['50%', '35%', '20%', '5%', '1%'] : ['20%', '5%']
+        const fb = tint_quality === 'carbon' ? ['50%','35%','20%','5%','1%'] : ['20%','5%']
         setAvailableShades(fb)
         setTintShades(prev => (prev.length ? prev.filter(s => fb.includes(s)) : [fb[0]]))
       })
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tint_quality])
 
@@ -123,34 +107,22 @@ export default function BookingForm({ onCreated }) {
       if (!windows.length) return alert('Select at least one window to work on')
       if (!tint_shades.length) return alert('Select at least one tint shade')
 
+      // 1) Create booking
       const payload = {
-        full_name,
-        phone,
-        email,
-        vehicle,
-        tint_quality,
-        tint_shades, // array
-        windows,
-        date,
-        start_time: slot.start,
-        end_time: slot.end
+        full_name, phone, email, vehicle,
+        tint_quality, tint_shades, windows,
+        date, start_time: slot.start, end_time: slot.end
       }
-
-      // 1) Create booking (server will compute totals and return booking_id)
       const createRes = await axios.post(`${API}/api/bookings/create`, payload)
       const { booking_id } = createRes.data || {}
+      if (!booking_id) return alert('Could not create booking. Please try again.')
 
-      if (!booking_id) {
-        return alert('Could not create booking. Please try again.')
-      }
-
-      // Optional hook for UI
       if (onCreated) onCreated(createRes.data)
 
-      // 2) Ask backend to create a Stripe Checkout Session and redirect there
+      // 2) Ask backend for a Stripe Checkout Session and redirect
       const chk = await axios.post(`${API}/api/payments/checkout`, { booking_id })
       const url = chk.data?.url
-      if (!url) return alert('Could not start payment. Please try again.')
+      if (!url) return alert('Payment could not start. Please try again.')
       window.location.href = url
     } catch (err) {
       console.error(err)
@@ -192,8 +164,7 @@ export default function BookingForm({ onCreated }) {
                 .sort((a, b) => a.start.localeCompare(b.start))
                 .map((s, i) => (
                   <option key={i} value={`${s.start}-${s.end}`} disabled={!s.enabled}>
-                    {s.start} - {s.end}
-                    {!s.enabled ? ' (Not available)' : ''}
+                    {s.start} - {s.end}{!s.enabled ? ' (Not available)' : ''}
                   </option>
                 ))}
             </select>
