@@ -35,7 +35,7 @@ export default function BookingForm({ onCreated }){
   const [vehicle,setVehicle]=useState('')
 
   const [tint_quality,setQuality]=useState('carbon')
-  // CHANGED: support multiple selected shades
+  // MULTI-SHADE SUPPORT
   const [tint_shades,setTintShades]=useState([])            // array of strings
   const [availableShades,setAvailableShades]=useState([])
 
@@ -55,8 +55,11 @@ export default function BookingForm({ onCreated }){
           : []
         if(list.length){
           setAvailableShades(list)
-          // if current selection contains items not in list, reset to first
-          setTintShades(prev => prev.filter(s=>list.includes(s)).length ? prev.filter(s=>list.includes(s)) : [list[0]])
+          // keep only valid selections; if none valid, default to first
+          setTintShades(prev=>{
+            const kept = prev.filter(s=>list.includes(s))
+            return kept.length ? kept : [list[0]]
+          })
         }else{
           setAvailableShades([])
           setTintShades([])
@@ -80,7 +83,7 @@ export default function BookingForm({ onCreated }){
   // helper to read multi-select options
   const onShadesChange = (e)=>{
     const sel = Array.from(e.target.selectedOptions).map(o=>o.value)
-    setTintShades(sel.length ? sel : [])
+    setTintShades(sel)
   }
 
   // fallback: treat slots without enabled flag as enabled
@@ -98,8 +101,7 @@ export default function BookingForm({ onCreated }){
     const payload={
       full_name, phone, email, vehicle,
       tint_quality,
-      // send array; backend is backward-compatible with single or multiple
-      tint_shades,
+      tint_shades,                  // send as array
       windows, date,
       start_time:slot.start, end_time:slot.end
     }
@@ -176,7 +178,12 @@ export default function BookingForm({ onCreated }){
 
           <div>
             <label>Tint Shade (single or multiple)</label>
-            <select multiple size={Math.min(6, Math.max(3, availableShades.length || 3))} value={tint_shades} onChange={onShadesChange}>
+            <select
+              multiple
+              size={Math.min(6, Math.max(3, availableShades.length || 3))}
+              value={tint_shades}
+              onChange={onShadesChange}
+            >
               {availableShades.map(s=>(
                 <option key={s} value={s}>{s}</option>
               ))}
