@@ -29,6 +29,7 @@ function addHours(hhmm, hours) {
 function endFromStart(start) { return addHours(start, 2) }
 
 // ---- availability ----
+// (Keeps your existing rules, including Saturday next-hour block if you had it)
 router.get('/availability', (req, res) => {
   const { date } = req.query
   if (!date) return res.status(400).json({ error: 'date required' })
@@ -107,7 +108,7 @@ router.post('/create', (req, res) => {
   res.json({ booking_id: id, amount_total: total, amount_deposit: deposit })
 })
 
-// ---- finalize booking after Stripe deposit ----
+// ---- finalize booking after deposit ----
 // Creates the Google Calendar event on success
 router.post('/finalize', async (req, res) => {
   const { booking_id, payment_intent_id } = req.body || {}
@@ -127,7 +128,7 @@ router.post('/finalize', async (req, res) => {
   } catch (e) {
     console.error('Calendar error:', e?.message || e)
     await saveBookings()
-    // Still succeed booking even if calendar insert fails
+    // Booking still succeeds even if calendar insert fails
     res.status(200).json({ ok: true, calendar_warning: e?.message || 'calendar failed' })
   }
 })
