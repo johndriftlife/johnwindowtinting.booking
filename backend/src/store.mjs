@@ -1,4 +1,4 @@
-// backend/src/store.js
+// backend/src/store.mjs
 import path from 'path'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { fileURLToPath } from 'url'
@@ -30,29 +30,22 @@ export const db = {
       { shade: '5%',  available: true },
     ],
   },
-  // backend/src/store.js (only the slots array)
-export const db = {
-  // ...
+  // Weekday: 0=Sun … 6=Sat
+  // Tue–Fri → 14:00; Sat → 09:00–14:00 hourly; Sun → 10:00
   slots: [
-    // Tue–Fri 2PM
     { weekday: 2, start_time: '14:00', enabled: 1 }, // Tue
     { weekday: 3, start_time: '14:00', enabled: 1 }, // Wed
     { weekday: 4, start_time: '14:00', enabled: 1 }, // Thu
     { weekday: 5, start_time: '14:00', enabled: 1 }, // Fri
-
-    // Sat: 9AM, 10AM, 11AM, 12PM, 1PM, 2PM
     { weekday: 6, start_time: '09:00', enabled: 1 },
     { weekday: 6, start_time: '10:00', enabled: 1 },
     { weekday: 6, start_time: '11:00', enabled: 1 },
     { weekday: 6, start_time: '12:00', enabled: 1 },
     { weekday: 6, start_time: '13:00', enabled: 1 },
     { weekday: 6, start_time: '14:00', enabled: 1 },
-
-    // Sun: 10AM
-    { weekday: 0, start_time: '10:00', enabled: 1 },
-  ]
+    { weekday: 0, start_time: '10:00', enabled: 1 }, // Sun
+  ],
 }
-
 
 // ---- Helpers for persistence ----
 async function ensureDir() {
