@@ -12,7 +12,7 @@ export default function Home(){
         {step === 'pay' && pending && <PaymentForm amount={pending.amount_deposit} total={pending.amount_total} bookingId={pending.booking_id} customerEmail={pending.customer_email} onSuccess={()=>setStep('done')} />}
         {step === 'done' && <div className='text-center space-y-1'><h2 className='text-2xl font-semibold text-accent'>Deposit received 🎉</h2><p>Your booking is confirmed. See you soon!</p></div>}
       </div>
-      <p className='text-center text-xs text-gray-300'>Tue–Fri 2–4pm • Sat 9–11 / 11–13 / 14–16 • Sun 10–12 • Mon closed · <a href='/admin'>Admin</a></p>
+      <p className='text-center text-xs text-gray-300'>Tue–Fri 2PM • Sat 9AM / 11AM / 14PM • Sun 10AM • Mon closed · <a href='/admin'>Admin</a></p>
     </div>
   )
 }
