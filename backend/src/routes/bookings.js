@@ -1,24 +1,15 @@
 // backend/src/routes/bookings.js
 import express from 'express'
-import { db } from '../store.mjs'
+import { db, saveBookings } from '../store.mjs'
 import { v4 as uuid } from 'uuid'
+import { createCalendarEvent } from '../integrations/googleCalendar.mjs'
 
 const router = express.Router()
 
 // Prices (cents)
 const PRICE_VALUES = {
-  carbon: {
-    front_doors: 4000,
-    rear_doors: 4000,
-    front_windshield: 8000,
-    rear_windshield: 8000,
-  },
-  ceramic: {
-    front_doors: 6000,
-    rear_doors: 6000,
-    front_windshield: 10000,
-    rear_windshield: 10000,
-  },
+  carbon: { front_doors: 4000, rear_doors: 4000, front_windshield: 8000, rear_windshield: 8000 },
+  ceramic:{ front_doors: 6000, rear_doors: 6000, front_windshield:10000, rear_windshield:10000 }
 }
 
 // ---- helpers ----
@@ -36,9 +27,7 @@ function addHours(hhmm, hours) {
   return `${hh}:${mm}`
 }
 // Visually show each booking as a 2-hour block
-function endFromStart(start) {
-  return addHours(start, 2)
-}
+function endFromStart(start) { return addHours(start, 2) }
 
 // ---- availability ----
 // Returns ALL configured slots for that weekday with `enabled`:
@@ -52,14 +41,12 @@ router.get('/availability', (req, res) => {
   const w = weekdayOf(date)
   const base = db.slots.filter(s => s.weekday === w)
 
-  // currently booked start times (ignore cancelled)
   const bookedStarts = new Set(
     db.bookings
       .filter(b => b.date === date && b.status !== 'cancelled')
       .map(b => b.start_time)
   )
 
-  // Saturday rule: block the hour AFTER any booked start
   const alsoBlocked = new Set()
   if (w === 6) {
     for (const start of bookedStarts) alsoBlocked.add(addHours(start, 1))
@@ -77,14 +64,14 @@ router.get('/availability', (req, res) => {
 })
 
 // ---- create booking ----
-// Accepts single shade as `tint_shade` (string) OR multiple as `tint_shades` (array)
+// Accepts single shade (tint_shade) OR multiple (tint_shades)
 router.post('/create', (req, res) => {
   const {
     full_name, phone, email, vehicle,
     tint_quality,
-    tint_shade,      // optional (single)
-    tint_shades,     // optional (array)
-    windows, date, start_time, end_time,
+    tint_shade,          // optional single
+    tint_shades,         // optional array
+    windows, date, start_time, end_time
   } = req.body || {}
 
   // normalize shades to array
@@ -101,14 +88,12 @@ router.post('/create', (req, res) => {
     return res.status(400).json({ error: 'missing fields' })
   }
 
-  // validate slot exists and is enabled
   const w = weekdayOf(date)
   const slotDef = db.slots.find(s => s.weekday === w && s.start_time === start_time)
   if (!slotDef || !slotDef.enabled) {
     return res.status(400).json({ error: 'time slot not available' })
   }
 
-  // prevent double booking at same start_time
   const conflict = db.bookings.find(
     b => b.date === date && b.start_time === start_time && b.status !== 'cancelled'
   )
@@ -121,34 +106,44 @@ router.post('/create', (req, res) => {
   const id = uuid()
   db.bookings.push({
     id,
-    full_name,
-    phone,
-    email,
-    vehicle,
+    full_name, phone, email, vehicle,
     tint_quality,
-    // store selections
     tint_shades_json: JSON.stringify(shadesArray),
     windows_json: JSON.stringify(windows),
-    date,
-    start_time,
-    end_time,
+    date, start_time, end_time,
     amount_total: total,
     amount_deposit: deposit,
     status: 'pending_payment',
     payment_intent_id: null,
+    google_event_id: null
   })
 
   res.json({ booking_id: id, amount_total: total, amount_deposit: deposit })
 })
 
 // ---- finalize booking after Stripe deposit ----
-router.post('/finalize', (req, res) => {
+// On success, create a Google Calendar event and store its id
+router.post('/finalize', async (req, res) => {
   const { booking_id, payment_intent_id } = req.body || {}
   const b = db.bookings.find(x => x.id === booking_id)
   if (!b) return res.status(404).json({ error: 'booking not found' })
+
   b.payment_intent_id = payment_intent_id
   b.status = 'deposit_paid'
-  res.json({ ok: true })
+
+  try {
+    if (!b.google_event_id) {
+      const eventId = await createCalendarEvent(b)
+      b.google_event_id = eventId
+    }
+    await saveBookings()
+    res.json({ ok: true, google_event_id: b.google_event_id })
+  } catch (e) {
+    console.error('Calendar error:', e?.message || e)
+    // Still succeed booking even if calendar fails
+    await saveBookings()
+    res.status(200).json({ ok: true, calendar_warning: e?.message || 'calendar failed' })
+  }
 })
 
 export default router
