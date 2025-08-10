@@ -7,7 +7,7 @@ import bookingsRouter from './routes/bookings.js'
 import paymentsRouter from './routes/payments.js'
 import adminRouter from './routes/admin.js'
 import publicRouter from './routes/public.js'
-import { loadAll } from './store.js'
+import { loadAll } from './store.mjs'
 
 const app = express()
 const FRONTEND_URL = (process.env.FRONTEND_URL || '').replace(/\/+$/, '')
