@@ -11,7 +11,13 @@ export default function Home(){
       <div style={{border:'1px solid #ddd', borderRadius:12, padding:16}}>
         {step === 'book' && <BookingForm onCreated={(data)=>{ setPending(data); setStep('pay') }} />}
         {step === 'pay' && pending && (
-          <PaymentForm amount={pending.amount_deposit} total={pending.amount_total} bookingId={pending.booking_id} customerEmail={pending.customer_email} onSuccess={()=>setStep('done')} />
+          <PaymentForm
+            amount={pending.amount_deposit}
+            total={pending.amount_total}
+            bookingId={pending.booking_id}
+            customerEmail={pending.customer_email}
+            onSuccess={()=>setStep('done')}
+          />
         )}
         {step === 'done' && (
           <div style={{textAlign:'center'}}>
