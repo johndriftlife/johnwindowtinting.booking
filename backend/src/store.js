@@ -1,94 +1,160 @@
-// backend/src/store.js
-import path from 'path'
-import { readFile, writeFile, mkdir } from 'fs/promises'
-import { fileURLToPath } from 'url'
+// backend/src/routes/bookings.js
+import express from 'express'
+import { db } from '../store.js'
+import { v4 as uuid } from 'uuid'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const router = express.Router()
 
-// If you attach a Render Disk, set DATA_PATH=/data in your backend env
-const DATA_PATH = process.env.DATA_PATH || path.join(__dirname, '..', '..', 'data')
-
-const FILES = {
-  slots: path.join(DATA_PATH, 'slots.json'),
-  shades: path.join(DATA_PATH, 'shades.json'),
-  bookings: path.join(DATA_PATH, 'bookings.json'),
-}
-
-// ---- Default in-memory data (used on first run if files don’t exist) ----
-export const db = {
-  bookings: [],
-  shades: {
-    carbon: [
-      { shade: '50%', available: true },
-      { shade: '35%', available: true },
-      { shade: '20%', available: true },
-      { shade: '5%',  available: true },
-      { shade: '1%',  available: true },
-    ],
-    ceramic: [
-      { shade: '20%', available: true },
-      { shade: '5%',  available: true },
-    ],
+// Prices in cents
+const PRICE_VALUES = {
+  carbon: {
+    front_doors: 4000,
+    rear_doors: 4000,
+    front_windshield: 8000,
+    rear_windshield: 8000,
   },
-
-  // Weekday: 0=Sun … 6=Sat
-  // NEW SCHEDULE:
-  // Tue–Fri → 14:00 (2PM)
-  // Sat     → 09:00, 10:00, 11:00, 12:00, 13:00, 14:00
-  // Sun     → 10:00 (10AM)
-  // Mon     → closed (no entries)
-  slots: [
-    // Tue–Fri 2PM
-    { weekday: 2, start_time: '14:00', enabled: 1 }, // Tue
-    { weekday: 3, start_time: '14:00', enabled: 1 }, // Wed
-    { weekday: 4, start_time: '14:00', enabled: 1 }, // Thu
-    { weekday: 5, start_time: '14:00', enabled: 1 }, // Fri
-
-    // Saturday all hours listed
-    { weekday: 6, start_time: '09:00', enabled: 1 },
-    { weekday: 6, start_time: '10:00', enabled: 1 },
-    { weekday: 6, start_time: '11:00', enabled: 1 },
-    { weekday: 6, start_time: '12:00', enabled: 1 },
-    { weekday: 6, start_time: '13:00', enabled: 1 },
-    { weekday: 6, start_time: '14:00', enabled: 1 },
-
-    // Sunday one slot
-    { weekday: 0, start_time: '10:00', enabled: 1 },
-  ],
+  ceramic: {
+    front_doors: 6000,
+    rear_doors: 6000,
+    front_windshield: 10000,
+    rear_windshield: 10000,
+  },
 }
 
-// ---- Helpers for persistence ----
-async function ensureDir() {
-  await mkdir(DATA_PATH, { recursive: true })
+// ---- helpers ----
+function weekdayOf(dateStr) {
+  // 0=Sun ... 6=Sat
+  const d = new Date(dateStr + 'T00:00:00')
+  return d.getUTCDay()
 }
 
-async function loadJSON(file, fallback) {
-  try {
-    const txt = await readFile(file, 'utf8')
-    return JSON.parse(txt)
-  } catch {
-    return fallback
+function addHours(hhmm, hours) {
+  const [h, m] = hhmm.split(':').map(Number)
+  const base = new Date(Date.UTC(2000, 0, 1, h, m || 0))
+  base.setUTCHours(base.getUTCHours() + hours)
+  const hh = String(base.getUTCHours()).padStart(2, '0')
+  const mm = String(base.getUTCMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+// Each booking visually spans 2 hours on the UI
+function endFromStart(start) {
+  return addHours(start, 2)
+}
+
+// ---- availability ----
+// Returns ALL configured slots for the given date's weekday,
+// with an `enabled` flag computed by:
+//  - Admin toggle (db.slots[].enabled)
+//  - Already-booked start times on that date
+//  - SATURDAY SPECIAL: also disable the hour AFTER any booked start
+router.get('/availability', (req, res) => {
+  const { date } = req.query
+  if (!date) return res.status(400).json({ error: 'date required' })
+
+  const w = weekdayOf(date)
+
+  // base slots configured for that weekday (from persistent store)
+  const base = db.slots.filter(s => s.weekday === w)
+
+  // collect already-booked start times for the date (ignore cancelled)
+  const bookedStarts = new Set(
+    db.bookings
+      .filter(b => b.date === date && b.status !== 'cancelled')
+      .map(b => b.start_time)
+  )
+
+  // On Saturday (6), also block the following hour after any booked start
+  const alsoBlocked = new Set()
+  if (w === 6) {
+    for (const start of bookedStarts) {
+      alsoBlocked.add(addHours(start, 1))
+    }
   }
-}
 
-async function saveJSON(file, data) {
-  await ensureDir()
-  await writeFile(file, JSON.stringify(data, null, 2))
-}
+  const slots = base.map(s => {
+    const start = s.start_time
+    const isBooked = bookedStarts.has(start)
+    const saturdayFollowingBlocked = alsoBlocked.has(start)
+    const enabled = !!s.enabled && !isBooked && !saturdayFollowingBlocked
+    return { start, end: endFromStart(start), enabled }
+  })
 
-// ---- Public API used by routes/server ----
-export async function loadAll() {
-  await ensureDir()
-  const [slots, shades, bookings] = await Promise.all([
-    loadJSON(FILES.slots, db.slots),
-    loadJSON(FILES.shades, db.shades),
-    loadJSON(FILES.bookings, db.bookings),
-  ])
-  db.slots = slots
-  db.shades = shades
-  db.bookings = bookings
-}
+  res.json({ date, slots })
+})
 
-export async function saveSlots()    { await saveJSON(FILES.slots, db.slots) }
-export async function saveShades()   { await saveJSON(FILES.shades, db.shades) }
-export async function saveBookings() { await saveJSON(FILES.bookings, db.bookings) }
+// ---- create booking ----
+router.post('/create', (req, res) => {
+  const {
+    full_name,
+    phone,
+    email,
+    vehicle,
+    tint_quality,
+    tint_shade,
+    windows,   // array of keys (front_doors, rear_doors, front_windshield, rear_windshield)
+    date,
+    start_time,
+    end_time,
+  } = req.body || {}
+
+  if (
+    !full_name || !phone || !email || !vehicle ||
+    !tint_quality || !tint_shade || !Array.isArray(windows) ||
+    !date || !start_time || !end_time
+  ) {
+    return res.status(400).json({ error: 'missing fields' })
+  }
+
+  // validate that the slot exists and is enabled at the time of booking
+  const w = weekdayOf(date)
+  const slotDef = db.slots.find(s => s.weekday === w && s.start_time === start_time)
+  if (!slotDef || !slotDef.enabled) {
+    return res.status(400).json({ error: 'time slot not available' })
+  }
+
+  // prevent double booking on the same start_time
+  const conflict = db.bookings.find(
+    b => b.date === date && b.start_time === start_time && b.status !== 'cancelled'
+  )
+  if (conflict) {
+    return res.status(409).json({ error: 'time already booked' })
+  }
+
+  const values = PRICE_VALUES[tint_quality] || {}
+  const total = windows.reduce((sum, w) => sum + (values[w] || 0), 0)
+  const deposit = Math.floor(total * 0.5)
+
+  const id = uuid()
+  db.bookings.push({
+    id,
+    full_name,
+    phone,
+    email,
+    vehicle,
+    tint_quality,
+    tint_shade,
+    windows_json: JSON.stringify(windows),
+    date,
+    start_time,
+    end_time,
+    amount_total: total,
+    amount_deposit: deposit,
+    status: 'pending_payment',
+    payment_intent_id: null,
+  })
+
+  res.json({ booking_id: id, amount_total: total, amount_deposit: deposit })
+})
+
+// ---- finalize booking after Stripe deposit ----
+router.post('/finalize', (req, res) => {
+  const { booking_id, payment_intent_id } = req.body || {}
+  const b = db.bookings.find(x => x.id === booking_id)
+  if (!b) return res.status(404).json({ error: 'booking not found' })
+  b.payment_intent_id = payment_intent_id
+  b.status = 'deposit_paid'
+  res.json({ ok: true })
+})
+
+export default router
