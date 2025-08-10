@@ -119,11 +119,18 @@ export default function BookingForm({ onCreated }) {
 
       if (onCreated) onCreated(createRes.data)
 
-      // 2) Ask backend for a Stripe Checkout Session and redirect
-      const chk = await axios.post(`${API}/api/payments/checkout`, { booking_id })
-      const url = chk.data?.url
-      if (!url) return alert('Payment could not start. Please try again.')
-      window.location.href = url
+      // 2) Start Stripe Checkout — POST (preferred)
+      try {
+        const chk = await axios.post(`${API}/api/payments/checkout`, { booking_id })
+        const url = chk.data?.url
+        if (!url) throw new Error('No checkout URL returned')
+        window.location.href = url
+        return
+      } catch (postErr) {
+        console.warn('POST /checkout failed, trying GET fallback…', postErr?.message)
+        // GET fallback so even if someone navigates by URL, it still works
+        window.location.href = `${API}/api/payments/checkout?b=${encodeURIComponent(booking_id)}`
+      }
     } catch (err) {
       console.error(err)
       alert(err?.response?.data?.error || 'Something went wrong. Please try again.')
