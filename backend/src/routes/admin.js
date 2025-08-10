@@ -1,6 +1,6 @@
 import express from 'express'
 import Stripe from 'stripe'
-import { db, saveShades, saveSlots } from '../store.js'
+import { db, saveShades, saveSlots } from '../store.mjs'
 
 const router = express.Router()
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' })
