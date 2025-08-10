@@ -1,0 +1,14 @@
+import express from 'express'
+import Stripe from 'stripe'
+const router = express.Router()
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' })
+router.post('/create-payment-intent', async (req, res) => {
+  try{
+    const { amount_deposit, amount_total, customer_email, metadata } = req.body || {}
+    if (!amount_deposit || !customer_email) return res.status(400).json({ error: 'amount_deposit and customer_email required' })
+    const paymentIntent = await stripe.paymentIntents.create({ amount: amount_deposit, currency: 'eur', receipt_email: customer_email, metadata: { ...metadata, amount_total: amount_total || '' }, automatic_payment_methods: { enabled: true } })
+    res.json({ client_secret: paymentIntent.client_secret, payment_intent_id: paymentIntent.id })
+  }catch(e){ console.error(e); res.status(500).json({ error: e.message }) }
+})
+router.post('/webhook', (_req, res) => { res.json({ received: true }) })
+export default router
