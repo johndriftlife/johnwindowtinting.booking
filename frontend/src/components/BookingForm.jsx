@@ -24,6 +24,46 @@ const PRICE_VALUES = {
   ceramic:{ front_doors: 6000, rear_doors: 6000, front_windshield:10000, rear_windshield:10000 }
 }
 
+// Little pill checkbox UI for multi-select shades
+function ShadePills({ options, value, onChange }) {
+  const toggle = (shade) => {
+    if (value.includes(shade)) {
+      onChange(value.filter(s => s !== shade))
+    } else {
+      onChange([...value, shade])
+    }
+  }
+  // Keyboard support: Space/Enter toggles
+  const onKey = (e, shade) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault()
+      toggle(shade)
+    }
+  }
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map(shade => {
+        const active = value.includes(shade)
+        return (
+          <button
+            key={shade}
+            type="button"
+            onClick={() => toggle(shade)}
+            onKeyDown={(e) => onKey(e, shade)}
+            className={
+              `px-3 py-1 rounded-full border transition
+               ${active ? 'bg-accent/20 border-accent text-accent' : 'border-white/30 text-white/90 hover:border-accent/60'}`
+            }
+            aria-pressed={active}
+          >
+            {shade}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function BookingForm({ onCreated }){
   const [date,setDate]=useState('')
   const [slots,setSlots]=useState([])
@@ -35,7 +75,6 @@ export default function BookingForm({ onCreated }){
   const [vehicle,setVehicle]=useState('')
 
   const [tint_quality,setQuality]=useState('carbon')
-  // MULTI-SHADE SUPPORT
   const [tint_shades,setTintShades]=useState([])            // array of strings
   const [availableShades,setAvailableShades]=useState([])
 
@@ -79,12 +118,6 @@ export default function BookingForm({ onCreated }){
   const amount_deposit=Math.floor(amount_total*0.5)
 
   const toggleWindow=(k)=> setWindows(p=> p.includes(k)? p.filter(x=>x!==k): [...p,k])
-
-  // helper to read multi-select options
-  const onShadesChange = (e)=>{
-    const sel = Array.from(e.target.selectedOptions).map(o=>o.value)
-    setTintShades(sel)
-  }
 
   // fallback: treat slots without enabled flag as enabled
   const displaySlots = useMemo(
@@ -177,18 +210,12 @@ export default function BookingForm({ onCreated }){
           </div>
 
           <div>
-            <label>Tint Shade (single or multiple)</label>
-            <select
-              multiple
-              size={Math.min(6, Math.max(3, availableShades.length || 3))}
+            <label>Tint Shade (tap/click to select multiple)</label>
+            <ShadePills
+              options={availableShades}
               value={tint_shades}
-              onChange={onShadesChange}
-            >
-              {availableShades.map(s=>(
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            <p className='text-xs text-gray-400 mt-1'>Tip: hold Ctrl/⌘ to select multiple.</p>
+              onChange={setTintShades}
+            />
           </div>
         </div>
 
