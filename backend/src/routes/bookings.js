@@ -5,7 +5,7 @@ import { v4 as uuid } from 'uuid'
 
 const router = express.Router()
 
-// Prices in cents
+// Prices (cents)
 const PRICE_VALUES = {
   carbon: {
     front_doors: 4000,
@@ -27,7 +27,6 @@ function weekdayOf(dateStr) {
   const d = new Date(dateStr + 'T00:00:00')
   return d.getUTCDay()
 }
-
 function addHours(hhmm, hours) {
   const [h, m] = hhmm.split(':').map(Number)
   const base = new Date(Date.UTC(2000, 0, 1, h, m || 0))
@@ -36,40 +35,34 @@ function addHours(hhmm, hours) {
   const mm = String(base.getUTCMinutes()).padStart(2, '0')
   return `${hh}:${mm}`
 }
-
-// Each booking visually spans 2 hours on the UI
+// Visually show each booking as a 2-hour block
 function endFromStart(start) {
   return addHours(start, 2)
 }
 
 // ---- availability ----
-// Returns ALL configured slots for the given date's weekday,
-// with an `enabled` flag computed by:
-//  - Admin toggle (db.slots[].enabled)
-//  - Already-booked start times on that date
-//  - SATURDAY SPECIAL: also disable the hour AFTER any booked start
+// Returns ALL configured slots for that weekday with `enabled`:
+// - disabled if admin toggled off
+// - disabled if already booked at that start_time
+// - on Saturday, also disable the NEXT hour after any booked start
 router.get('/availability', (req, res) => {
   const { date } = req.query
   if (!date) return res.status(400).json({ error: 'date required' })
 
   const w = weekdayOf(date)
-
-  // base slots configured for that weekday (from persistent store)
   const base = db.slots.filter(s => s.weekday === w)
 
-  // collect already-booked start times for the date (ignore cancelled)
+  // currently booked start times (ignore cancelled)
   const bookedStarts = new Set(
     db.bookings
       .filter(b => b.date === date && b.status !== 'cancelled')
       .map(b => b.start_time)
   )
 
-  // On Saturday (6), also block the following hour after any booked start
+  // Saturday rule: block the hour AFTER any booked start
   const alsoBlocked = new Set()
   if (w === 6) {
-    for (const start of bookedStarts) {
-      alsoBlocked.add(addHours(start, 1))
-    }
+    for (const start of bookedStarts) alsoBlocked.add(addHours(start, 1))
   }
 
   const slots = base.map(s => {
@@ -84,45 +77,45 @@ router.get('/availability', (req, res) => {
 })
 
 // ---- create booking ----
+// Accepts single shade as `tint_shade` (string) OR multiple as `tint_shades` (array)
 router.post('/create', (req, res) => {
   const {
-    full_name,
-    phone,
-    email,
-    vehicle,
+    full_name, phone, email, vehicle,
     tint_quality,
-    tint_shade,
-    windows,   // array of keys (front_doors, rear_doors, front_windshield, rear_windshield)
-    date,
-    start_time,
-    end_time,
+    tint_shade,      // optional (single)
+    tint_shades,     // optional (array)
+    windows, date, start_time, end_time,
   } = req.body || {}
+
+  // normalize shades to array
+  const shadesArray =
+    Array.isArray(tint_shades) ? tint_shades :
+    (typeof tint_shade === 'string' && tint_shade.trim() ? [tint_shade.trim()] : [])
 
   if (
     !full_name || !phone || !email || !vehicle ||
-    !tint_quality || !tint_shade || !Array.isArray(windows) ||
-    !date || !start_time || !end_time
+    !tint_quality || !Array.isArray(windows) ||
+    !date || !start_time || !end_time ||
+    shadesArray.length === 0
   ) {
     return res.status(400).json({ error: 'missing fields' })
   }
 
-  // validate that the slot exists and is enabled at the time of booking
+  // validate slot exists and is enabled
   const w = weekdayOf(date)
   const slotDef = db.slots.find(s => s.weekday === w && s.start_time === start_time)
   if (!slotDef || !slotDef.enabled) {
     return res.status(400).json({ error: 'time slot not available' })
   }
 
-  // prevent double booking on the same start_time
+  // prevent double booking at same start_time
   const conflict = db.bookings.find(
     b => b.date === date && b.start_time === start_time && b.status !== 'cancelled'
   )
-  if (conflict) {
-    return res.status(409).json({ error: 'time already booked' })
-  }
+  if (conflict) return res.status(409).json({ error: 'time already booked' })
 
   const values = PRICE_VALUES[tint_quality] || {}
-  const total = windows.reduce((sum, w) => sum + (values[w] || 0), 0)
+  const total = windows.reduce((sum, wkey) => sum + (values[wkey] || 0), 0)
   const deposit = Math.floor(total * 0.5)
 
   const id = uuid()
@@ -133,7 +126,8 @@ router.post('/create', (req, res) => {
     email,
     vehicle,
     tint_quality,
-    tint_shade,
+    // store selections
+    tint_shades_json: JSON.stringify(shadesArray),
     windows_json: JSON.stringify(windows),
     date,
     start_time,
