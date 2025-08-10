@@ -6,75 +6,66 @@ import { finalizeBooking } from '../services/finalizeBooking.mjs'
 
 const router = express.Router()
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2024-06-20',
-})
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' })
 
-// Create PaymentIntent (example endpoint if you need one)
-router.post('/create-intent', async (req, res) => {
+// Create a Stripe Checkout Session for the 50% deposit
+router.post('/checkout', async (req, res) => {
   try {
-    const { booking_id, amount_cents, currency = 'eur' } = req.body || {}
-    if (!booking_id || !amount_cents) return res.status(400).json({ error: 'missing fields' })
+    const { booking_id } = req.body || {}
+    const b = db.bookings.find(x => x.id === booking_id)
+    if (!b) return res.status(404).json({ error: 'booking not found' })
 
-    const intent = await stripe.paymentIntents.create({
-      amount: amount_cents,
-      currency,
+    const amountCents = b.amount_deposit // deposit already computed in /create
+    const successUrl = `${process.env.PUBLIC_FRONTEND_URL || ''}/?status=success`
+    const cancelUrl  = `${process.env.PUBLIC_FRONTEND_URL || ''}/?status=cancelled`
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      currency: 'eur',
+      line_items: [{
+        price_data: {
+          currency: 'eur',
+          product_data: { name: `Deposit for booking #${b.id}` },
+          unit_amount: amountCents
+        },
+        quantity: 1
+      }],
       metadata: { booking_id },
-      automatic_payment_methods: { enabled: true },
+      success_url: successUrl,
+      cancel_url: cancelUrl
     })
-    res.json({ client_secret: intent.client_secret })
+
+    res.json({ url: session.url })
   } catch (e) {
     console.error(e)
-    res.status(500).json({ error: 'stripe error' })
+    res.status(500).json({ error: 'stripe checkout error' })
   }
 })
 
-// Stripe webhook (must be raw body)
+// Webhook (MUST be raw body)
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature']
   let event
-
   try {
-    const whSecret = process.env.STRIPE_WEBHOOK_SECRET
-    if (!whSecret) {
-      console.error('Missing STRIPE_WEBHOOK_SECRET')
-      return res.status(500).send('Webhook not configured')
-    }
-    event = stripe.webhooks.constructEvent(req.body, sig, whSecret)
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET)
   } catch (err) {
-    console.error('Webhook signature verification failed.', err.message)
+    console.error('Webhook signature verification failed:', err.message)
     return res.status(400).send(`Webhook Error: ${err.message}`)
   }
 
   try {
-    switch (event.type) {
-      case 'payment_intent.succeeded': {
-        const pi = event.data.object
-        const booking_id = pi.metadata?.booking_id
-        if (booking_id) {
-          await finalizeBooking({ db, saveBookings }, { booking_id, payment_intent_id: pi.id })
-        }
-        break
+    if (event.type === 'checkout.session.completed') {
+      const cs = event.data.object
+      const booking_id = cs.metadata?.booking_id
+      const payment_intent_id = cs.payment_intent || cs.id
+      if (booking_id) {
+        await finalizeBooking({ db, saveBookings }, { booking_id, payment_intent_id })
       }
-      case 'checkout.session.completed': {
-        const cs = event.data.object
-        // For Checkout Sessions, the PaymentIntent id is cs.payment_intent
-        const booking_id = cs.metadata?.booking_id
-        const payment_intent_id = cs.payment_intent || cs.id
-        if (booking_id) {
-          await finalizeBooking({ db, saveBookings }, { booking_id, payment_intent_id })
-        }
-        break
-      }
-      default:
-        // ignore others
-        break
     }
-
     res.json({ received: true })
   } catch (err) {
     console.error('Webhook handler error:', err)
-    res.status(500).send('Webhook handler failed')
+    res.status(500).send('Webhook failed')
   }
 })
 
