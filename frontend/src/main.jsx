@@ -14,8 +14,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <Elements stripe={stripePromise}>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/admin" element={<AdminPage />} />
+          <Route path='/' element={<Home />} />
+          <Route path='/admin' element={<AdminPage />} />
         </Routes>
       </BrowserRouter>
     </Elements>
