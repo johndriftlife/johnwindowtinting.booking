@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
-import logo from '../assets/logo.jpg'
+import logo from '../assets/logo.png'
 const API = import.meta.env.VITE_API_BASE
 const PRICE_LABELS={carbon:{front_doors:'Front Doors €40',rear_doors:'Rear Doors €40',front_windshield:'Front Windshield €80',rear_windshield:'Rear Windshield €80'},ceramic:{front_doors:'Front Doors €60',rear_doors:'Rear Doors €60',front_windshield:'Front Windshield €100',rear_windshield:'Rear Windshield €100'}}
 const PRICE_VALUES={carbon:{front_doors:4000,rear_doors:4000,front_windshield:8000,rear_windshield:8000},ceramic:{front_doors:6000,rear_doors:6000,front_windshield:10000,rear_windshield:10000}}
