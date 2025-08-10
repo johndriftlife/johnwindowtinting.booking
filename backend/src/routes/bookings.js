@@ -2,7 +2,7 @@
 import express from 'express'
 import { db, saveBookings } from '../store.mjs'
 import { v4 as uuid } from 'uuid'
-import { createCalendarEvent } from '../integrations/googleCalendar.mjs'
+import { finalizeBooking } from '../services/finalizeBooking.mjs'
 
 const router = express.Router()
 
@@ -13,23 +13,16 @@ const PRICE_VALUES = {
 }
 
 // ---- helpers ----
-function weekdayOf(dateStr) {
-  // 0=Sun ... 6=Sat
-  const d = new Date(dateStr + 'T00:00:00')
-  return d.getUTCDay()
-}
+function weekdayOf(dateStr) { return new Date(dateStr + 'T00:00:00').getUTCDay() } // 0=Sun…6=Sat
 function addHours(hhmm, hours) {
   const [h, m] = hhmm.split(':').map(Number)
-  const base = new Date(Date.UTC(2000, 0, 1, h, m || 0))
+  const base = new Date(Date.UTC(2000,0,1,h,m||0))
   base.setUTCHours(base.getUTCHours() + hours)
-  const hh = String(base.getUTCHours()).padStart(2, '0')
-  const mm = String(base.getUTCMinutes()).padStart(2, '0')
-  return `${hh}:${mm}`
+  return String(base.getUTCHours()).padStart(2,'0') + ':' + String(base.getUTCMinutes()).padStart(2,'0')
 }
 function endFromStart(start) { return addHours(start, 2) }
 
 // ---- availability ----
-// (Keeps your existing rules, including Saturday next-hour block if you had it)
 router.get('/availability', (req, res) => {
   const { date } = req.query
   if (!date) return res.status(400).json({ error: 'date required' })
@@ -38,14 +31,10 @@ router.get('/availability', (req, res) => {
   const base = db.slots.filter(s => s.weekday === w)
 
   const bookedStarts = new Set(
-    db.bookings
-      .filter(b => b.date === date && b.status !== 'cancelled')
-      .map(b => b.start_time)
+    db.bookings.filter(b => b.date === date && b.status !== 'cancelled').map(b => b.start_time)
   )
-
-  // Saturday: block next hour after any booked start
   const alsoBlocked = new Set()
-  if (w === 6) for (const start of bookedStarts) alsoBlocked.add(addHours(start, 1))
+  if (w === 6) for (const start of bookedStarts) alsoBlocked.add(addHours(start, 1)) // Saturday rule
 
   const slots = base.map(s => {
     const start = s.start_time
@@ -105,31 +94,19 @@ router.post('/create', (req, res) => {
     google_event_id: null
   })
 
+  // IMPORTANT FOR AUTO-FINALIZE:
+  // When you create the Stripe PaymentIntent/Checkout Session, include metadata: { booking_id: id }
   res.json({ booking_id: id, amount_total: total, amount_deposit: deposit })
 })
 
-// ---- finalize booking after deposit ----
-// Creates the Google Calendar event on success
+// ---- manual finalize (kept for testing) ----
 router.post('/finalize', async (req, res) => {
   const { booking_id, payment_intent_id } = req.body || {}
-  const b = db.bookings.find(x => x.id === booking_id)
-  if (!b) return res.status(404).json({ error: 'booking not found' })
-
-  b.payment_intent_id = payment_intent_id
-  b.status = 'deposit_paid'
-
   try {
-    if (!b.google_event_id) {
-      const eventId = await createCalendarEvent(b)
-      b.google_event_id = eventId
-    }
-    await saveBookings()
+    const b = await finalizeBooking({ db, saveBookings }, { booking_id, payment_intent_id })
     res.json({ ok: true, google_event_id: b.google_event_id })
   } catch (e) {
-    console.error('Calendar error:', e?.message || e)
-    await saveBookings()
-    // Booking still succeeds even if calendar insert fails
-    res.status(200).json({ ok: true, calendar_warning: e?.message || 'calendar failed' })
+    res.status(400).json({ error: e?.message || 'finalize failed' })
   }
 })
 
