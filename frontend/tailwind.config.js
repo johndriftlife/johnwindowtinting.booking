@@ -4,7 +4,7 @@ export default {
     extend: {
       colors: {
         brand: "#0a0a0a",
-        accent: "#c25a06",
+        accent: "#f7f5f2",
         action: "#202000"
       }
     }
