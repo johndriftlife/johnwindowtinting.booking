@@ -6,7 +6,7 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar']
 function getJwtClient() {
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
   let privateKey = process.env.GOOGLE_PRIVATE_KEY || ''
-  // Render/ENV-safe: convert \n to real newlines
+  // Render-safe: turn \n sequences back into newlines
   privateKey = privateKey.replace(/\\n/g, '\n')
 
   if (!clientEmail || !privateKey) {
@@ -21,8 +21,8 @@ function getJwtClient() {
 }
 
 /**
- * Create a calendar event, returns event id
- * booking: { id, full_name, phone, email, vehicle, tint_quality, tint_shades_json, date, start_time, end_time }
+ * Create a calendar event. Returns event id.
+ * booking: { id, full_name, phone, email, vehicle, tint_quality, tint_shades_json, date, start_time, end_time, amount_total, amount_deposit }
  */
 export async function createCalendarEvent(booking) {
   const calendarId = process.env.GOOGLE_CALENDAR_ID
@@ -33,11 +33,10 @@ export async function createCalendarEvent(booking) {
 
   const tz = process.env.TZ || 'America/Guadeloupe'
   const startISO = `${booking.date}T${booking.start_time}:00`
-  const endISO = `${booking.date}T${booking.end_time}:00`
+  const endISO   = `${booking.date}T${booking.end_time}:00`
 
-  const shades = (() => {
-    try { return JSON.parse(booking.tint_shades_json || '[]') } catch { return [] }
-  })()
+  let shades = []
+  try { shades = JSON.parse(booking.tint_shades_json || '[]') } catch {}
 
   const summary = `Window Tint • ${booking.full_name}`
   const description =
@@ -58,10 +57,6 @@ export async function createCalendarEvent(booking) {
     reminders: { useDefault: true }
   }
 
-  const res = await calendar.events.insert({
-    calendarId,
-    requestBody
-  })
-
+  const res = await calendar.events.insert({ calendarId, requestBody })
   return res.data.id
 }
