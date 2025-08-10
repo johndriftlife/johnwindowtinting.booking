@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.btn { @apply inline-flex items-center justify-center px-5 py-2.5 rounded-2xl bg-action text-white font-medium shadow hover:opacity-90; }
+.card { @apply bg-black/60 border border-accent/40 rounded-2xl shadow p-6; }
+.section { @apply max-w-3xl mx-auto p-6; }
+label { @apply text-sm text-gray-200; }
+input, select { @apply w-full bg-black/40 border border-accent/30 rounded-lg px-3 py-2 text-white; }
+input:focus, select:focus { @apply outline-none ring-2 ring-accent/60; }
+a.link { @apply text-accent underline; }
+h1 { @apply text-3xl font-bold text-accent; }
