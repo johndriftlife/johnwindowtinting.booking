@@ -1,6 +1,6 @@
 // backend/src/routes/bookings.js
 import express from 'express'
-import { db } from '../store.js'
+import { db } from '../store.mjs'
 import { v4 as uuid } from 'uuid'
 
 const router = express.Router()
