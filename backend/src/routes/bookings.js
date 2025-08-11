@@ -8,7 +8,10 @@ router.get('/availability', (req, res) => {
   const date = req.query.date
   if (!date) return res.status(400).json({ error: 'date required' })
 
+  // Base slots from schedule
   let slots = defaultSlotsFor(date).map(s => ({ ...s, enabled: true }))
+
+  // Admin overrides for that date
   if (db.admin.slotToggles[date]) {
     slots = db.admin.slotToggles[date].map(o => ({
       start: o.start,
@@ -17,15 +20,15 @@ router.get('/availability', (req, res) => {
     }))
   }
 
+  // Remove already-booked starts
   const booked = getBookingsForDate(date).filter(b => b.status !== 'cancelled')
   const bookedStarts = new Set(booked.map(b => b.start_time))
-
   const d = new Date(date + 'T00:00:00')
   const wd = d.getUTCDay()
 
   const out = slots.map(s => ({ ...s, enabled: s.enabled && !bookedStarts.has(s.start) }))
 
-  // On Saturdays (wd === 6), also disable the slot immediately after any booked start
+  // On Saturdays also block the slot immediately after any booked start
   if (wd === 6) {
     const addDisabled = new Set()
     for (const b of booked) {
@@ -71,4 +74,4 @@ router.post('/create', (req, res) => {
   res.json({ ok: true, booking_id: rec.id })
 })
 
-export default ro
+export default router
