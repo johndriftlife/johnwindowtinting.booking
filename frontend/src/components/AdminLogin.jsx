@@ -28,8 +28,10 @@ export default function AdminLogin(){
       if(!data?.token){ throw new Error('No token returned') }
       localStorage.setItem('admin_token', data.token)
       alert('Logged in!')
-      // back to booking page without full reload
+      // Go back to booking page without full reload
       window.location.hash = ''
+      // Ensure the app notices immediately
+      setTimeout(() => { try { window.dispatchEvent(new HashChangeEvent('hashchange')) } catch {} }, 0)
     }catch(err){
       setError(err?.response?.data?.error || err?.message || 'Login failed')
     }finally{
