@@ -8,6 +8,11 @@ import paymentsRouter from './routes/payments.js'
 import bookingsRouter from './routes/bookings.js'
 import adminRouter from './routes/admin.js'
 import publicRouter from './routes/public.js'
+import devRouter from './routes/dev.js'   // add this near the top with other imports
+
+// ... after app is created and middleware set up:
+app.use('/api/dev', devRouter)            // add this
+
 
 import { loadAll } from './store.mjs' // <-- change to './store.js' if your file is .js
 
