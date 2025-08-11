@@ -1,54 +1,49 @@
 // backend/src/routes/dev.js
-import express from 'express'
-import { google } from 'googleapis'
+import { Router } from 'express'
+import Stripe from 'stripe'
+import { addBooking } from '../store.mjs'
+import { createCalendarEventSafe } from '../services/googleCalendar.mjs'
 
-const router = express.Router()
+const router = Router()
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', { apiVersion: '2024-06-20' })
 
-// quick sanity endpoint so you can test routing without Google
-router.get('/ping', (req, res) => res.json({ ok: true, msg: 'dev router mounted' }))
-
-function getJwt() {
-  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL
-  let privateKey = process.env.GOOGLE_PRIVATE_KEY
-  if (!clientEmail || !privateKey) {
-    throw new Error('Missing GOOGLE_CLIENT_EMAIL or GOOGLE_PRIVATE_KEY')
-  }
-  // Render env often stores newlines as "\n"
-  privateKey = privateKey.replace(/\\n/g, '\n')
-
-  return new google.auth.JWT({
-    email: clientEmail,
-    key: privateKey,
-    scopes: ['https://www.googleapis.com/auth/calendar'],
-  })
-}
-
-router.get('/calendar-ping', async (req, res) => {
+// Existing ping (kept)
+router.get('/calendar-ping', async (_req, res) => {
   try {
-    const calendarId = process.env.GOOGLE_CALENDAR_ID
-    if (!calendarId) return res.status(400).json({ ok: false, error: 'GOOGLE_CALENDAR_ID missing' })
+    await createCalendarEventSafe({
+      full_name:'Ping', email:'ping@example.com', date:'2099-01-01',
+      start_time:'10:00', end_time:'', vehicle:'Test',
+      tint_quality:'carbon', tint_shades:['50%'], windows:['front_doors']
+    })
+    res.json({ ok:true })
+  } catch (e) { res.status(500).json({ error:String(e) }) }
+})
 
-    const auth = getJwt()
-    const calendar = google.calendar({ version: 'v3', auth })
-
-    const start = new Date(Date.now() + 2 * 60 * 1000)
-    const end = new Date(start.getTime() + 10 * 60 * 1000)
-
-    const created = await calendar.events.insert({
-      calendarId,
-      requestBody: {
-        summary: 'API test (auto-delete)',
-        start: { dateTime: start.toISOString() },
-        end: { dateTime: end.toISOString() },
-      },
+// NEW: simple Stripe check you can open in your browser
+router.get('/payment-test-intent', async (_req, res) => {
+  try {
+    // 1) create a fake booking in memory
+    const booking = addBooking({
+      full_name:'Test User', phone:'+1 555-000-0000', email:'test@example.com',
+      vehicle:'Test Vehicle', tint_quality:'carbon', tint_shades:['35%'],
+      windows:['front_doors'], date:'2099-01-01', start_time:'10:00', end_time:'',
+      amount_total: 4000, amount_deposit: 2000
     })
 
-    await calendar.events.delete({ calendarId, eventId: created.data.id })
-    return res.json({ ok: true, message: 'Calendar write OK (insert+delete succeeded)' })
-  } catch (err) {
-    console.error('calendar-ping error:', err?.response?.data || err?.message || err)
-    const details = err?.response?.data || { error: String(err?.message || err) }
-    return res.status(500).json({ ok: false, ...details })
+    // 2) create a PaymentIntent for the deposit
+    const pi = await stripe.paymentIntents.create({
+      amount: booking.amount_deposit,
+      currency: 'eur',
+      metadata: { booking_id: booking.id, purpose: 'deposit' },
+      receipt_email: booking.email,
+      automatic_payment_methods: { enabled: true }
+    })
+
+    // 3) if you see clientSecret below in your browser, Stripe is OK
+    res.json({ ok:true, booking_id: booking.id, clientSecret: pi.client_secret })
+  } catch (e) {
+    console.error('payment-test-intent error', e)
+    res.status(500).json({ ok:false, error: e?.message || 'stripe error' })
   }
 })
 
