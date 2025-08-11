@@ -1,52 +1,49 @@
-// backend/src/routes/payments.js
-import { Router } from 'express'
-import Stripe from 'stripe'
-import { db, markPaid } from '../store.mjs'
-import { createCalendarEventSafe } from '../services/googleCalendar.mjs'
+// backend/src/store.mjs
+import { v4 as uuid } from 'uuid'
 
-const router = Router()
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', { apiVersion: '2024-06-20' })
-
-router.post('/checkout', async (req, res) => {
-  try {
-    const { booking_id } = req.body || {}
-    if (!booking_id) return res.status(400).json({ error:'booking_id required' })
-    const booking = db.bookings.find(b => b.id === booking_id)
-    if (!booking) return res.status(404).json({ error:'booking not found' })
-    const depositCents = booking.amount_deposit || Math.floor((booking.amount_total || 0) * 0.5)
-    if (depositCents <= 0) return res.status(400).json({ error:'invalid amount' })
-    const success = (process.env.FRONTEND_URL || '').replace(/\/$/,'') + '/?success=1'
-    const cancel  = (process.env.FRONTEND_URL || '').replace(/\/$/,'') + '/?canceled=1'
-    const session = await stripe.checkout.sessions.create({
-      mode:'payment',
-      success_url: success,
-      cancel_url: cancel,
-      customer_email: booking.email,
-      metadata: { booking_id: booking.id },
-      line_items:[{ quantity:1, price_data:{ currency:'eur', unit_amount: depositCents, product_data:{ name:`Deposit for ${booking.full_name}`, description:`Appointment ${booking.date} ${booking.start_time}` } } }]
-    })
-    res.json({ url: session.url })
-  } catch (e) { console.error('checkout error', e); res.status(500).json({ error:'stripe error' }) }
-})
-
-export async function webhookHandler(req, res) {
-  const sig = req.headers['stripe-signature']
-  const whSecret = process.env.STRIPE_WEBHOOK_SECRET || ''
-  let event
-  try {
-    event = new Stripe(process.env.STRIPE_SECRET_KEY || '', { apiVersion: '2024-06-20' })
-      .webhooks.constructEvent(req.body, sig, whSecret)
-  } catch (err) { console.error('Webhook signature verify failed:', err?.message); return res.status(400).send(`Webhook Error: ${err.message}`) }
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object
-    const bookingId = session.metadata?.booking_id
-    const rec = markPaid(bookingId)
-    if (rec) {
-      console.log('Booking finalized via Checkout:', rec.id)
-      try { await createCalendarEventSafe(rec) } catch (e) { console.log('Calendar create failed:', e?.message || e) }
-    }
+export const db = {
+  bookings: [],
+  admin: {
+    shades: {
+      carbon: [
+        { shade: '50%', available: true },
+        { shade: '35%', available: true },
+        { shade: '20%', available: true },
+        { shade: '5%',  available: true },
+        { shade: '1%',  available: true }
+      ],
+      ceramic: [
+        { shade: '20%', available: true },
+        { shade: '5%',  available: true }
+      ]
+    },
+    slotToggles: {}
   }
-  res.json({ received:true })
 }
 
-export default router
+export function defaultSlotsFor(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00')
+  const wd = d.getUTCDay()
+  if (wd === 1) return [] // Monday closed
+  if (wd >= 2 && wd <= 5) return [{ start: '14:00', end: '' }]
+  if (wd === 6) return ['09:00','10:00','11:00','12:00','13:00','14:00'].map(h => ({ start: h, end: '' }))
+  if (wd === 0) return [{ start: '10:00', end: '' }]
+  return []
+}
+
+export function addBooking(payload) {
+  const id = uuid()
+  const rec = { id, status: 'pending', ...payload }
+  db.bookings.push(rec)
+  return rec
+}
+
+export function markPaid(bookingId) {
+  const b = db.bookings.find(x => x.id === bookingId)
+  if (b) b.status = 'paid'
+  return b
+}
+
+export function getBookingsForDate(dateStr) {
+  return db.bookings.filter(b => b.date === dateStr)
+}
