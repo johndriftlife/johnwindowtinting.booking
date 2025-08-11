@@ -1,58 +1,83 @@
 // backend/src/routes/bookings.js
 import express from 'express'
 import { v4 as uuidv4 } from 'uuid'
-import { db, saveBookings } from '../store.mjs' // <-- change to '../store.js' if that's your file
+import { db, saveBookings } from '../store.mjs' // change to '../store.js' if needed
 
 const router = express.Router()
 
-// ---- PRICES (cents) ----
+// ---------- pricing (in cents) ----------
 const PRICE_VALUES = {
-  carbon:   { front_doors: 4000, rear_doors: 4000, front_windshield: 8000,  rear_windshield: 8000 },
-  ceramic:  { front_doors: 6000, rear_doors: 6000, front_windshield: 10000, rear_windshield: 10000 }
+  carbon:  { front_doors: 4000, rear_doors: 4000, front_windshield: 8000,  rear_windshield: 8000 },
+  ceramic: { front_doors: 6000, rear_doors: 6000, front_windshield: 10000, rear_windshield: 10000 }
 }
 
-// ---- Safe, lazy calendar call so the server always boots ----
-async function createCalendarEventSafe(booking) {
+// ---------- calendar safe wrappers ----------
+async function calendarCreateSafe(booking) {
   if (process.env.DISABLE_CALENDAR === 'true') return null
   try {
-    // Use .mjs or .js to match your file name
     const mod = await import('../services/googleCalendar.mjs').catch(async () => await import('../services/googleCalendar.js'))
-    if (!mod?.createCalendarEvent && !mod?.addBookingToCalendar) return null
-    // support either exported name
     const fn = mod.createCalendarEvent || mod.addBookingToCalendar
-    return await fn(booking)
+    return fn ? await fn(booking) : null
   } catch (e) {
-    console.error('Calendar module not available:', e?.message || e)
+    console.error('Calendar create failed:', e?.message || e)
     return null
   }
 }
 
-// ---- Helper: compute totals from windows & tint quality ----
+async function calendarUpdateSafe(booking) {
+  if (process.env.DISABLE_CALENDAR === 'true') return null
+  try {
+    const mod = await import('../services/googleCalendar.mjs').catch(async () => await import('../services/googleCalendar.js'))
+    if (booking.calendar_event_id && mod.updateCalendarEvent) {
+      return await mod.updateCalendarEvent(booking)
+    }
+    // If no event yet, create one now
+    const creator = mod.createCalendarEvent || mod.addBookingToCalendar
+    return creator ? await creator(booking) : null
+  } catch (e) {
+    console.error('Calendar update failed:', e?.message || e)
+    return null
+  }
+}
+
+async function calendarDeleteSafe(eventId) {
+  if (process.env.DISABLE_CALENDAR === 'true') return null
+  try {
+    const mod = await import('../services/googleCalendar.mjs').catch(async () => await import('../services/googleCalendar.js'))
+    if (mod.deleteCalendarEvent) {
+      await mod.deleteCalendarEvent(eventId)
+    }
+  } catch (e) {
+    console.error('Calendar delete failed:', e?.message || e)
+  }
+}
+
+// ---------- helpers ----------
 function computeAmounts({ tint_quality = 'carbon', windows = [] }) {
   const map = PRICE_VALUES[tint_quality] || PRICE_VALUES.carbon
   const amount_total = windows.reduce((sum, key) => sum + (map[key] || 0), 0)
-  const amount_deposit = Math.floor(amount_total * 0.5) // 50% deposit
+  const amount_deposit = Math.floor(amount_total * 0.5)
   return { amount_total, amount_deposit }
 }
 
-// ---- GET /availability?date=YYYY-MM-DD (kept simple; uses your stored settings/overrides if present) ----
+function findBooking(id) {
+  return (db.bookings || []).find(b => b.id === id)
+}
+
+// ---------- GET /availability ----------
 router.get('/availability', (req, res) => {
   const { date } = req.query
   if (!date) return res.status(400).json({ error: 'date required as YYYY-MM-DD' })
 
-  // If you persist per-date slot overrides, serve them:
   const override = db.slot_overrides?.[date]
-  if (override?.slots) {
-    return res.json({ date, slots: override.slots })
-  }
+  if (override?.slots) return res.json({ date, slots: override.slots })
 
-  // Fall back to your generated defaults already in memory (if you keep them)
   if (db.default_slots_generator) {
     const slots = db.default_slots_generator(date)
     return res.json({ date, slots })
   }
 
-  // Minimal default in case nothing else is present (Tue–Fri 14:00; Sat hourly 09–14; Sun 10:00; Mon none)
+  // Minimal defaults (Tue–Fri 14:00; Sat 09–14 hourly; Sun 10:00; Mon none)
   const d = new Date(date + 'T00:00:00')
   const weekday = ((d.getUTCDay() + 6) % 7) + 1 // 1=Mon..7=Sun
   let slots = []
@@ -66,7 +91,7 @@ router.get('/availability', (req, res) => {
   return res.json({ date, slots })
 })
 
-// ---- POST /create  -> creates booking, saves, and AUTO-ADDS to Google Calendar ----
+// ---------- POST /create ----------
 router.post('/create', async (req, res) => {
   try {
     const {
@@ -75,8 +100,8 @@ router.post('/create', async (req, res) => {
       email = '',
       vehicle = '',
       tint_quality = 'carbon',
-      tint_shade,              // string (mobile) OR
-      tint_shades,             // array (desktop multi-select)
+      tint_shade,
+      tint_shades,
       windows = [],
       date,
       start_time,
@@ -85,16 +110,14 @@ router.post('/create', async (req, res) => {
 
     if (!date) return res.status(400).json({ error: 'date required' })
     if (!start_time) return res.status(400).json({ error: 'start_time required' })
-    if (!windows || !Array.isArray(windows) || windows.length === 0) {
+    if (!Array.isArray(windows) || windows.length === 0) {
       return res.status(400).json({ error: 'at least one window is required' })
     }
 
-    // Normalize shade(s)
     let shades = []
     if (Array.isArray(tint_shades)) shades = tint_shades
     else if (tint_shade) shades = [tint_shade]
 
-    // Compute money
     const { amount_total, amount_deposit } = computeAmounts({ tint_quality, windows })
 
     const booking = {
@@ -104,7 +127,7 @@ router.post('/create', async (req, res) => {
       payment_status: 'unpaid',
       date,
       start_time,
-      end_time: end_time || start_time, // your UI often uses single time; keep same if missing
+      end_time: end_time || start_time,
       full_name,
       phone,
       email,
@@ -117,23 +140,19 @@ router.post('/create', async (req, res) => {
       amount_deposit
     }
 
-    // Persist
     db.bookings = db.bookings || []
     db.bookings.push(booking)
     await saveBookings()
 
-    // Fire-and-forget calendar creation (don’t block the response if it fails)
-    createCalendarEventSafe(booking)
-      .then(ev => {
-        if (ev?.id) {
-          booking.calendar_event_id = ev.id
-          booking.calendar_link = ev.htmlLink
-          return saveBookings()
-        }
-      })
-      .catch(() => {})
+    // async calendar create
+    calendarCreateSafe(booking).then(async ev => {
+      if (ev?.id) {
+        booking.calendar_event_id = ev.id
+        booking.calendar_link = ev.htmlLink
+        await saveBookings()
+      }
+    }).catch(() => {})
 
-    // Return to client
     res.json({
       id: booking.id,
       date: booking.date,
@@ -148,6 +167,83 @@ router.post('/create', async (req, res) => {
     console.error('Create booking error:', e?.message || e)
     res.status(500).json({ error: 'failed to create booking' })
   }
+})
+
+// ---------- PUT /:id  (update booking + calendar) ----------
+router.put('/:id', async (req, res) => {
+  try {
+    const b = findBooking(req.params.id)
+    if (!b) return res.status(404).json({ error: 'booking not found' })
+
+    // Allow updates on core fields (only if provided)
+    const fields = [
+      'full_name', 'phone', 'email', 'vehicle',
+      'tint_quality', 'tint_shade', 'tint_shades',
+      'windows', 'date', 'start_time', 'end_time', 'status'
+    ]
+    for (const f of fields) {
+      if (typeof req.body[f] !== 'undefined') b[f] = req.body[f]
+    }
+
+    // Normalize shades
+    if (Array.isArray(b.tint_shades) && b.tint_shades.length > 1) {
+      b.tint_shade = undefined
+    } else if (b.tint_shade) {
+      b.tint_shades = undefined
+    }
+
+    // Recompute amounts if windows or tint_quality changed
+    if (req.body.windows || req.body.tint_quality) {
+      const { amount_total, amount_deposit } = computeAmounts({ tint_quality: b.tint_quality, windows: b.windows || [] })
+      b.amount_total = amount_total
+      b.amount_deposit = amount_deposit
+    }
+
+    await saveBookings()
+
+    // Update (or create) calendar event
+    const ev = await calendarUpdateSafe(b)
+    if (ev?.id) {
+      b.calendar_event_id = ev.id
+      b.calendar_link = ev.htmlLink
+      await saveBookings()
+    }
+
+    res.json({ ok: true, booking: b })
+  } catch (e) {
+    console.error('Update booking error:', e?.message || e)
+    res.status(500).json({ error: 'failed to update booking' })
+  }
+})
+
+// ---------- DELETE /:id  (cancel booking + delete calendar event) ----------
+router.delete('/:id', async (req, res) => {
+  try {
+    const b = findBooking(req.params.id)
+    if (!b) return res.status(404).json({ error: 'booking not found' })
+
+    // mark cancelled
+    b.status = 'cancelled'
+    await saveBookings()
+
+    if (b.calendar_event_id) {
+      await calendarDeleteSafe(b.calendar_event_id)
+      // keep the id for audit, or clear it if you prefer:
+      // delete b.calendar_event_id
+      await saveBookings()
+    }
+
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('Cancel booking error:', e?.message || e)
+    res.status(500).json({ error: 'failed to cancel booking' })
+  }
+})
+
+// ---------- POST /:id/cancel  (alternate cancel endpoint) ----------
+router.post('/:id/cancel', async (req, res) => {
+  req.method = 'DELETE'
+  return router.handle(req, res)
 })
 
 export default router
