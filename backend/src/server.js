@@ -35,6 +35,9 @@ app.use('/api/bookings', bookingsRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/public', publicRouter)
 
+// ← mount the dev router
+app.use('/api/dev', devRouter)
+
 // Health
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
 
