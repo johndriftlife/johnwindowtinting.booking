@@ -100,8 +100,14 @@ function AdminSecretLogo({src,alt}){
   return <img src={src} alt={alt} onClick={onClick} style={{height:160,width:'auto',borderRadius:12,cursor:'pointer',display:'block',margin:'0 auto'}}/>
 }
 
-const PRICE_LABELS={carbon:{front_doors:'Front Doors €40',rear_doors:'Rear Doors €40',front_windshield:'Front Windshield €80',rear_windshield:'Rear Windshield €80'},ceramic:{front_doors:'Front Doors €60',rear_doors:'Rear Doors €60',front_windshield:'Front Windshield €100',rear_windshield:'Rear Windshield €100'}}
-const PRICE_VALUES={carbon:{front_doors:4000,rear_doors:4000,front_windshield:8000,rear_windshield:8000},ceramic:{front_doors:6000,rear_doors:6000,front_windshield:10000,rear_windshield:10000}}
+const PRICE_LABELS={
+  carbon:{front_doors:'Front Doors €40',rear_doors:'Rear Doors €40',front_windshield:'Front Windshield €80',rear_windshield:'Rear Windshield €80'},
+  ceramic:{front_doors:'Front Doors €60',rear_doors:'Rear Doors €60',front_windshield:'Front Windshield €100',rear_windshield:'Rear Windshield €100'}
+}
+const PRICE_VALUES={
+  carbon:{front_doors:4000,rear_doors:4000,front_windshield:8000,rear_windshield:8000},
+  ceramic:{front_doors:6000,rear_doors:6000,front_windshield:10000,rear_windshield:10000}
+}
 
 export default function BookingForm(){
   const {lang,setLang,t}=useI18n()
@@ -188,7 +194,28 @@ export default function BookingForm(){
           <div><label style={{display:'block',marginBottom:6}}>{t('email')}</label><input type='email' value={email} onChange={e=>setEmail(e.target.value)} required/></div>
           <div><label style={{display:'block',marginBottom:6}}>{t('vehicle')}</label><input value={vehicle} onChange={e=>setVehicle(e.target.value)} required/></div>
           <div><label style={{display:'block',marginBottom:6}}>{t('tint_quality')}</label><select value={tint_quality} onChange={e=>setQuality(e.target.value)}><option value='carbon'>{t('carbon_tint')}</option><option value='ceramic'>{t('ceramic_tint')}</option></select></div>
-          <div><label style={{display:'block',marginBottom:6}}>{t('tint_shades')}</label><div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>{(availableShades||[]).map(sh=>(<label key={sh} style={{display:'flex',gap:8,alignItems:'center'}}><input type='checkbox' checked={tint_shades.includes(sh)} onChange={()=>setTintShades(p=> p.includes(sh)? p.filter(x=>x!==sh): [...p,sh])}/><span>{sh}</span></label>))}</div></div>
+          <div><label style={{display:'block',marginBottom:6}}>{t('tint_shades')}</label>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>
+              {(availableShades||[]).map(sh=>(
+                <label key={sh} style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <input type='checkbox' checked={tint_shades.includes(sh)} onChange={()=>setTintShades(p=> p.includes(sh)? p.filter(x=>x!==sh): [...p,sh])}/>
+                  <span>{sh}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{display:'grid',gap:8}}>
+          <label style={{display:'block'}}>{t('windows_to_work')}</label>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            {Object.keys(labels).map(k=>(
+              <label key={k} style={{display:'flex',gap:8,alignItems:'center'}}>
+                <input type='checkbox' checked={windows.includes(k)} onChange={()=>toggleWindow(k)} />
+                <span>{labels[k]}</span>
+              </label>
+            ))}
+          </div>
         </div>
 
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'#111',border:'1px solid #D4AF3766',borderRadius:12,padding:12}}>
@@ -202,4 +229,74 @@ export default function BookingForm(){
 
       {showPayment && clientSecret && (
         <div style={{background:'#0b0b0b',border:'1px solid #D4AF3766',borderRadius:12,padding:16}}>
-          <div style={{marginBottom:8,opacit
+          <div style={{marginBottom:8,opacity:.9}}>{t('payment_ready')}</div>
+          <Elements stripe={stripePromise} options={{ clientSecret, appearance:{ theme:'night' } }} key={clientSecret}>
+            <InlinePayment
+              t={t}
+              onClose={()=>{ setShowPayment(false); setClientSecret('') }}
+              onLoadError={()=>setPaymentLoadErr(t('payment_error'))}
+            />
+          </Elements>
+          {paymentLoadErr && <div style={{color:'#ff6b6b',marginTop:8}}>{paymentLoadErr}</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InlinePayment({ t, onClose, onLoadError }){
+  const stripe = useStripe()
+  const elements = useElements()
+  const [busy,setBusy] = useState(false)
+  const [err,setErr] = useState('')
+  const [ready,setReady] = useState(false)
+  const [done,setDone] = useState(false)
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      if (!elements) return
+      try {
+        const el = elements.getElement('payment')
+        if (!el) onLoadError?.()
+      } catch { onLoadError?.() }
+    }, 1500)
+    return () => clearTimeout(id)
+  }, [elements, onLoadError])
+
+  const pay = async () => {
+    if (!stripe || !elements) return
+    setErr(''); setBusy(true)
+    const result = await stripe.confirmPayment({
+      elements,
+      confirmParams: { return_url: window.location.href },
+      redirect: 'if_required'
+    })
+    setBusy(false)
+    if (result.error) { setErr(result.error.message || 'Payment failed'); return }
+    setDone(true)
+  }
+
+  return (
+    <div style={{display:'grid',gap:12}}>
+      <div style={{minHeight:80,display:'grid',alignItems:'center'}}>
+        <PaymentElement onReady={()=>setReady(true)} />
+      </div>
+      {!ready && <div style={{fontSize:13,opacity:.7}}>Loading secure card form…</div>}
+      {err && <div style={{color:'#ff6b6b',fontSize:13}}>{err}</div>}
+      {done ? (
+        <div style={{color:'#6bff88',fontWeight:700}}>{t('payment_done')}</div>
+      ) : (
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={pay} disabled={!stripe || !elements || !ready || busy}
+            style={{background:ACCENT,color:'#000',padding:'8px 12px',borderRadius:12,fontWeight:700}}>
+            {busy ? t('paying') : t('pay_now')}
+          </button>
+          <button type="button" onClick={onClose} disabled={busy}
+            style={{background:'#222',color:'#D4AF37',padding:'8px 12px',borderRadius:12}}>
+            {t('cancel')}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
