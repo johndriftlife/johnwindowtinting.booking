@@ -1,11 +1,10 @@
-
 // frontend/src/components/BookingForm.jsx
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import logo from '../assets/logo.png'
 
-// Accent color for the Pay button (logo red)
-const ACCENT = '#C62828' // change this one line if you need a different red
+// Accent color for primary action
+const ACCENT = '#C62828'
 
 const API = import.meta.env.VITE_API_BASE
 const DICT={
@@ -68,7 +67,10 @@ function AdminSecretLogo({src,alt}){
     if(n>=3){
       setCount(0)
       const key=window.prompt('Enter admin key:'); if(!key) return
-      if(key===import.meta.env.VITE_ADMIN_KEY){ window.location.assign('/admin') } else { alert('Invalid key') }
+      if(key===import.meta.env.VITE_ADMIN_KEY){
+        // Use hash route to avoid full page reload (prevents blank page)
+        window.location.hash = '#/admin'
+      } else { alert('Invalid key') }
     }
   }
   return <img src={src} alt={alt} onClick={onClick} style={{height:160,width:'auto',borderRadius:12,cursor:'pointer',display:'block',margin:'0 auto'}}/>
@@ -80,14 +82,22 @@ const PRICE_VALUES={carbon:{front_doors:4000,rear_doors:4000,front_windshield:80
 export default function BookingForm(){
   const {lang,setLang,t}=useI18n()
   const [date,setDate]=useState(''); const [slots,setSlots]=useState([]); const [slot,setSlot]=useState(null)
+  const [slotsLoading,setSlotsLoading]=useState(false); const [slotsError,setSlotsError]=useState('')
   const [full_name,setFullName]=useState(''); const [phone,setPhone]=useState(''); const [email,setEmail]=useState(''); const [vehicle,setVehicle]=useState('')
   const [tint_quality,setQuality]=useState('carbon'); const [availableShades,setAvailableShades]=useState([]); const [tint_shades,setTintShades]=useState([])
   const [windows,setWindows]=useState([]); const [submitting,setSubmitting]=useState(false)
 
-  useEffect(()=>{ if(!date) return; axios.get(`${API}/api/bookings/availability`,{params:{date}}).then(r=>{setSlots(r.data.slots||[]);setSlot(null)}).catch(()=>setSlots([])) },[date])
+  useEffect(()=>{
+    if(!date){ setSlots([]); setSlot(null); setSlotsError(''); return }
+    setSlotsLoading(true); setSlotsError('')
+    axios.get(`${API.replace(/\/$/,'')}/api/bookings/availability`,{params:{date}})
+      .then(r=>{ setSlots(r.data.slots||[]); setSlot(null) })
+      .catch(err=>{ console.error('availability error', err); setSlots([]); setSlotsError('Could not load availability') })
+      .finally(()=>setSlotsLoading(false))
+  },[date])
 
   useEffect(()=>{
-    axios.get(`${API}/api/public/shades`).then(res=>{
+    axios.get(`${API.replace(/\/$/,'')}/api/public/shades`).then(res=>{
       const list=(res.data&&res.data[tint_quality])? res.data[tint_quality].filter(s=>s.available).map(s=>s.shade):[]
       if(list.length){ setAvailableShades(list); setTintShades(prev=>prev.filter(x=>list.includes(x))) }
       else { setAvailableShades(tint_quality==='carbon'?['50%','35%','20%','5%','1%']:['20%','5%']) }
@@ -139,17 +149,24 @@ export default function BookingForm(){
 
       <form className='space-y-4' onSubmit={submit} style={{display:'grid',gap:16}}>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-          <div><label style={{display:'block',marginBottom:6}}>{t('date')}</label><input type='date' value={date} onChange={e=>setDate(e.target.value)} /></div>
-          <div><label style={{display:'block',marginBottom:6}}>{t('time')}</label>
-            <select value={slot?`${slot.start}-${slot.end}`:''}
+          <div>
+            <label style={{display:'block',marginBottom:6}}>{t('date')}</label>
+            <input type='date' value={date} onChange={e=>setDate(e.target.value)} />
+            {!date && <small style={{display:'block',marginTop:6,opacity:.8}}>Pick a date to load times.</small>}
+          </div>
+          <div>
+            <label style={{display:'block',marginBottom:6}}>{t('time')}</label>
+            <select disabled={!date || slotsLoading} value={slot?`${slot.start}-${slot.end}`:''}
               onChange={e=>{ const v=e.target.value; if(!v) return setSlot(null); const [s,t]=v.split('-'); const chosen=slots.find(x=>x.start===s&&x.end===t); if(!chosen?.enabled) return; setSlot({start:s,end:t}) }}>
-              <option value="">{t('select_time')}</option>
+              <option value="">{slotsLoading?'Loading…':t('select_time')}</option>
               {slots.slice().sort((a,b)=>a.start.localeCompare(b.start)).map((s,i)=>(
                 <option key={i} value={`${s.start}-${s.end}`} disabled={!s.enabled}>
                   {s.start}{s.end?` - ${s.end}`:''} {!s.enabled?`(${t('not_available')})`:''}
                 </option>
               ))}
             </select>
+            {date && !slotsLoading && slots.length===0 && <small style={{display:'block',marginTop:6,color:'#ff6b6b'}}>No times available for this date.</small>}
+            {slotsError && <small style={{display:'block',marginTop:6,color:'#ff6b6b'}}>{slotsError}</small>}
           </div>
           <div><label style={{display:'block',marginBottom:6}}>{t('full_name')}</label><input value={full_name} onChange={e=>setFullName(e.target.value)} required/></div>
           <div><label style={{display:'block',marginBottom:6}}>{t('phone')}</label><input value={phone} onChange={e=>setPhone(e.target.value)} required/></div>
