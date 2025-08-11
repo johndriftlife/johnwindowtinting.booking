@@ -5,273 +5,99 @@ import logo from '../assets/logo.png'
 
 const API = import.meta.env.VITE_API_BASE
 
-// Prices
-const PRICE_LABELS = {
-  carbon: {
-    front_doors: 'Front Doors €40',
-    rear_doors: 'Rear Doors €40',
-    front_windshield: 'Front Windshield €80',
-    rear_windshield: 'Rear Windshield €80',
+// --- inline i18n (no external files needed) ---
+const DICT = {
+  en: {
+    book_title: 'Book an Appointment',
+    date: 'Date',
+    time: 'Time',
+    full_name: 'Full name',
+    phone: 'Phone',
+    email: 'Email address',
+    vehicle: 'Vehicle',
+    tint_quality: 'Tint Quality',
+    tint_shades: 'Tint Shades',
+    windows_to_work: 'Windows To Work On',
+    carbon_tint: 'Carbon Tint',
+    ceramic_tint: 'Ceramic Tint',
+    select_time: 'Select time',
+    not_available: 'Not available',
+    total: 'Total',
+    deposit: 'Deposit (50%)',
+    pay_and_book: 'Pay Deposit & Book Appointment',
   },
-  ceramic: {
-    front_doors: 'Front Doors €60',
-    rear_doors: 'Rear Doors €60',
-    front_windshield: 'Front Windshield €100',
-    rear_windshield: 'Rear Windshield €100',
+  fr: {
+    book_title: 'Prendre un rendez-vous',
+    date: 'Date',
+    time: 'Heure',
+    full_name: 'Nom complet',
+    phone: 'Téléphone',
+    email: 'Adresse e-mail',
+    vehicle: 'Véhicule',
+    tint_quality: 'Qualité du film',
+    tint_shades: 'Teintes',
+    windows_to_work: 'Vitres à traiter',
+    carbon_tint: 'Film Carbone',
+    ceramic_tint: 'Film Céramique',
+    select_time: 'Choisir une heure',
+    not_available: 'Indisponible',
+    total: 'Total',
+    deposit: 'Acompte (50%)',
+    pay_and_book: 'Payer l’acompte et réserver',
   },
 }
-const PRICE_VALUES = {
-  carbon: {
-    front_doors: 4000,
-    rear_doors: 4000,
-    front_windshield: 8000,
-    rear_windshield: 8000,
-  },
-  ceramic: {
-    front_doors: 6000,
-    rear_doors: 6000,
-    front_windshield: 10000,
-    rear_windshield: 10000,
-  },
+
+function useI18n() {
+  const [lang, setLang] = useState(() => localStorage.getItem('lang') || 'en')
+  useEffect(() => {
+    localStorage.setItem('lang', lang)
+    document.documentElement.setAttribute('lang', lang)
+  }, [lang])
+  const t = (k) => (DICT[lang] || DICT.en)[k] || k
+  return { lang, setLang, t }
 }
 
-export default function BookingForm() {
-  // form
-  const [date, setDate] = useState('')
-  const [slots, setSlots] = useState([])
-  const [slot, setSlot] = useState(null)
-
-  const [full_name, setFullName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [email, setEmail] = useState('')
-  const [vehicle, setVehicle] = useState('')
-
-  const [tint_quality, setQuality] = useState('carbon') // carbon | ceramic
-  const [availableShades, setAvailableShades] = useState([])
-  const [tint_shades, setTintShades] = useState([]) // multiple via checkboxes
-
-  const [windows, setWindows] = useState([])
-
-  // load slots whenever date changes
-  useEffect(() => {
-    if (!date) return
-    axios
-      .get(`${API}/api/bookings/availability`, { params: { date } })
-      .then((r) => {
-        setSlots(r.data.slots || [])
-        setSlot(null)
-      })
-      .catch(() => setSlots([]))
-  }, [date])
-
-  // load available shades from admin settings; fall back to defaults
-  useEffect(() => {
-    axios
-      .get(`${API}/api/public/shades`)
-      .then((res) => {
-        const list =
-          res.data && res.data[tint_quality]
-            ? res.data[tint_quality].filter((s) => s.available).map((s) => s.shade)
-            : []
-        if (list.length) {
-          setAvailableShades(list)
-          // keep any already selected that are still available
-          setTintShades((prev) => prev.filter((x) => list.includes(x)))
-        } else {
-          // fallback defaults
-          setAvailableShades(
-            tint_quality === 'carbon' ? ['50%', '35%', '20%', '5%', '1%'] : ['20%', '5%']
-          )
-        }
-      })
-      .catch(() => {
-        setAvailableShades(
-          tint_quality === 'carbon' ? ['50%', '35%', '20%', '5%', '1%'] : ['20%', '5%']
-        )
-      })
-  }, [tint_quality])
-
-  const priceValues = PRICE_VALUES[tint_quality]
-  const priceLabels = PRICE_LABELS[tint_quality]
-
-  const amount_total = useMemo(
-    () => windows.reduce((sum, key) => sum + (priceValues[key] || 0), 0),
-    [windows, priceValues]
-  )
-  const amount_deposit = Math.floor(amount_total * 0.5)
-
-  const toggleWindow = (key) =>
-    setWindows((prev) => (prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]))
-
-  const toggleShade = (shade) =>
-    setTintShades((prev) => (prev.includes(shade) ? prev.filter((s) => s !== shade) : [...prev, shade]))
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-
-    if (!date) return alert('Please choose a date.')
-    if (!slot) return alert('Please choose a time.')
-    if (windows.length === 0) return alert('Please select at least one window.')
-    if (amount_deposit <= 0) return alert('Deposit cannot be zero.')
-
-    const payload = {
-      full_name,
-      phone,
-      email,
-      vehicle,
-      tint_quality,
-      tint_shades, // array
-      windows,
-      date,
-      start_time: slot.start,
-      end_time: slot.end,
-      amount_total,
-      amount_deposit,
-    }
-
-    try {
-      // 1) Create the booking
-      const createRes = await axios.post(`${API}/api/bookings/create`, payload)
-      const booking_id = createRes.data?.booking_id
-      if (!booking_id) throw new Error('No booking_id returned')
-
-      // 2) Start Stripe Checkout (correct endpoint)
-      const payRes = await axios.post(`${API}/api/payments/checkout`, { booking_id })
-      const url = payRes.data?.url
-      if (!url) throw new Error('No checkout url returned')
-
-      // 3) Redirect to Stripe
-      window.location.assign(url)
-    } catch (err) {
-      console.error(err)
-      alert(err?.response?.data?.error || 'Stripe error')
-    }
-  }
-
+function LanguageSwitcher({ lang, setLang }) {
   return (
-    <div className="space-y-6">
-      {/* header */}
-      <div className="text-center space-y-3">
-        <img src={logo} className="h-64 w-auto mx-auto rounded-xl" alt="logo" />
-        <h1 className="text-accent text-3xl font-bold">Book an Appointment</h1>
-      </div>
-
-      {/* form */}
-      <form className="space-y-4" onSubmit={handleSubmit}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Date */}
-          <div>
-            <label className="block mb-1">Date</label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
-
-          {/* Time */}
-          <div>
-            <label className="block mb-1">Time</label>
-            <select
-              value={slot ? `${slot.start}-${slot.end}` : ''}
-              onChange={(e) => {
-                const v = e.target.value
-                if (!v) return setSlot(null)
-                const [s, t] = v.split('-')
-                const chosen = slots.find((x) => x.start === s && x.end === t)
-                if (!chosen?.enabled) return
-                setSlot({ start: s, end: t })
-              }}
-            >
-              <option value="">Select time</option>
-              {slots
-                .slice()
-                .sort((a, b) => a.start.localeCompare(b.start))
-                .map((s, i) => (
-                  <option key={i} value={`${s.start}-${s.end}`} disabled={!s.enabled}>
-                    {s.start}
-                    {s.end ? ` - ${s.end}` : ''} {!s.enabled ? '(Not available)' : ''}
-                  </option>
-                ))}
-            </select>
-          </div>
-
-          {/* Name / Phone */}
-          <div>
-            <label className="block mb-1">Full name</label>
-            <input value={full_name} onChange={(e) => setFullName(e.target.value)} required />
-          </div>
-          <div>
-            <label className="block mb-1">Phone</label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} required />
-          </div>
-
-          {/* Email / Vehicle */}
-          <div>
-            <label className="block mb-1">Email address</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          </div>
-          <div>
-            <label className="block mb-1">Vehicle</label>
-            <input
-              value={vehicle}
-              onChange={(e) => setVehicle(e.target.value)}
-              placeholder="e.g., Toyota Corolla 2018"
-              required
-            />
-          </div>
-
-          {/* Quality */}
-          <div>
-            <label className="block mb-1">Tint Quality</label>
-            <select value={tint_quality} onChange={(e) => setQuality(e.target.value)}>
-              <option value="carbon">Carbon Tint</option>
-              <option value="ceramic">Ceramic Tint</option>
-            </select>
-          </div>
-
-          {/* Shades (checkboxes, multi-select) */}
-          <div>
-            <label className="block mb-1">Tint Shades</label>
-            <div className="grid grid-cols-3 gap-3">
-              {availableShades.map((shade) => (
-                <label key={shade} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={tint_shades.includes(shade)}
-                    onChange={() => toggleShade(shade)}
-                  />
-                  <span>{shade}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Windows To Work On */}
-        <div className="space-y-2">
-          <label className="block">Windows To Work On</label>
-          <div className="grid md:grid-cols-2 gap-3">
-            {Object.keys(priceLabels).map((k) => (
-              <label key={k} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={windows.includes(k)}
-                  onChange={() => toggleWindow(k)}
-                />
-                <span>{priceLabels[k]}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Totals + Button */}
-        <div className="flex items-center justify-between bg-black/60 rounded-xl p-3 border border-accent/40">
-          <div className="text-sm">
-            Total: <strong>€{(amount_total / 100).toFixed(2)}</strong> • Deposit (50%):{' '}
-            <strong>€{(amount_deposit / 100).toFixed(2)}</strong>
-          </div>
-          <button className="btn" type="submit">
-            Pay Deposit &amp; Book Appointment
-          </button>
-        </div>
-      </form>
+    <div className="inline-flex items-center gap-2">
+      <span className="text-xl" aria-hidden>{lang === 'fr' ? '🇫🇷' : '🇺🇸'}</span>
+      <select
+        value={lang}
+        onChange={(e) => setLang(e.target.value)}
+        className="bg-black border border-accent/40 rounded-md px-2 py-1 text-sm"
+        aria-label="Language"
+      >
+        <option value="en">🇺🇸 English</option>
+        <option value="fr">🇫🇷 Français</option>
+      </select>
     </div>
   )
 }
+
+// Secret admin access: triple-click the logo → prompt for VITE_ADMIN_KEY
+function AdminSecretLogo({ src, alt }) {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    if (!count) return
+    const t = setTimeout(() => setCount(0), 600)
+    return () => clearTimeout(t)
+  }, [count])
+  const onClick = () => {
+    const n = count + 1
+    setCount(n)
+    if (n >= 3) {
+      setCount(0)
+      const key = window.prompt('Enter admin key:')
+      if (!key) return
+      if (key === import.meta.env.VITE_ADMIN_KEY) {
+        window.location.assign('/admin')
+      } else {
+        alert('Invalid key')
+      }
+    }
+  }
+  return (
+    <img
+      src={src}
+      className="h-64 w-auto mx-auto rounded-xl cursor-pointer"
+      alt={alt
