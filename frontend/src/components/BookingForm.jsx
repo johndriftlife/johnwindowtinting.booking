@@ -3,13 +3,19 @@ import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import logo from '../assets/logo.png'
 
+// Stripe inline Payment Element
+import { loadStripe } from '@stripe/stripe-js'
+import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '')
+
 // Accent color for primary action
 const ACCENT = '#C62828'
 
 const API = import.meta.env.VITE_API_BASE
 const DICT={
-  en:{book_title:'Book an Appointment',date:'Date',time:'Time',full_name:'Full name',phone:'Phone',email:'Email address',vehicle:'Vehicle',tint_quality:'Tint Quality',tint_shades:'Tint Shades',windows_to_work:'Windows To Work On',carbon_tint:'Carbon Tint',ceramic_tint:'Ceramic Tint',select_time:'Select time',not_available:'Not available',total:'Total',deposit:'Deposit (50%)',pay_and_book:'Pay Deposit & Book Appointment'},
-  fr:{book_title:'Prendre un rendez-vous',date:'Date',time:'Heure',full_name:'Nom complet',phone:'Téléphone',email:'Adresse e-mail',vehicle:'Véhicule',tint_quality:'Qualité du film',tint_shades:'Teintes',windows_to_work:'Vitres à traiter',carbon_tint:'Film Carbone',ceramic_tint:'Film Céramique',select_time:'Choisir une heure',not_available:'Indisponible',total:'Total',deposit:'Acompte (50%)',pay_and_book:'Payer l’acompte et réserver'}
+  en:{book_title:'Book an Appointment',date:'Date',time:'Time',full_name:'Full name',phone:'Phone',email:'Email address',vehicle:'Vehicle',tint_quality:'Tint Quality',tint_shades:'Tint Shades',windows_to_work:'Windows To Work On',carbon_tint:'Carbon Tint',ceramic_tint:'Ceramic Tint',select_time:'Select time',not_available:'Not available',total:'Total',deposit:'Deposit (50%)',pay_and_book:'Pay Deposit & Book Appointment',pay_now:'Pay Now',paying:'Processing…',cancel:'Cancel',payment_ready:'Enter your card to pay deposit',payment_done:'Payment received! Your booking is confirmed.'},
+  fr:{book_title:'Prendre un rendez-vous',date:'Date',time:'Heure',full_name:'Nom complet',phone:'Téléphone',email:'Adresse e-mail',vehicle:'Véhicule',tint_quality:'Qualité du film',tint_shades:'Teintes',windows_to_work:'Vitres à traiter',carbon_tint:'Film Carbone',ceramic_tint:'Film Céramique',select_time:'Choisir une heure',not_available:'Indisponible',total:'Total',deposit:'Acompte (50%)',pay_and_book:'Payer l’acompte et réserver',pay_now:'Payer maintenant',paying:'Traitement…',cancel:'Annuler',payment_ready:'Entrez votre carte pour payer l’acompte',payment_done:'Paiement reçu ! Votre rendez-vous est confirmé.'}
 }
 
 function useI18n(){
@@ -25,7 +31,6 @@ function Flag({code}){
   if(code==='fr'){
     return (<svg viewBox="0 0 3 2" style={style} aria-hidden="true"><rect width="1" height="2" x="0" fill="#0055A4"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#EF4135"/></svg>)
   }
-  // default to US
   return (
     <svg viewBox="0 0 190 100" style={style} aria-hidden="true">
       <rect width="190" height="100" fill="#B22234"/>
@@ -67,10 +72,8 @@ function AdminSecretLogo({src,alt}){
     if(n>=3){
       setCount(0)
       const key=window.prompt('Enter admin key:'); if(!key) return
-      if(key===import.meta.env.VITE_ADMIN_KEY){
-        // Use hash route to avoid full page reload (prevents blank page)
-        window.location.hash = '#/admin'
-      } else { alert('Invalid key') }
+      if(key===import.meta.env.VITE_ADMIN_KEY){ window.location.hash = '#/admin' }
+      else { alert('Invalid key') }
     }
   }
   return <img src={src} alt={alt} onClick={onClick} style={{height:160,width:'auto',borderRadius:12,cursor:'pointer',display:'block',margin:'0 auto'}}/>
@@ -86,6 +89,10 @@ export default function BookingForm(){
   const [full_name,setFullName]=useState(''); const [phone,setPhone]=useState(''); const [email,setEmail]=useState(''); const [vehicle,setVehicle]=useState('')
   const [tint_quality,setQuality]=useState('carbon'); const [availableShades,setAvailableShades]=useState([]); const [tint_shades,setTintShades]=useState([])
   const [windows,setWindows]=useState([]); const [submitting,setSubmitting]=useState(false)
+
+  // Inline Payment state
+  const [clientSecret, setClientSecret] = useState('')
+  const [showPayment, setShowPayment] = useState(false)
 
   useEffect(()=>{
     if(!date){ setSlots([]); setSlot(null); setSlotsError(''); return }
@@ -123,14 +130,19 @@ export default function BookingForm(){
     try{ setSubmitting(true) }catch{}
 
     try{
+      // 1) Create booking
       const r1=await axios.post(`${API.replace(/\/$/,'')}/api/bookings/create`,payload)
       const id=r1.data?.booking_id
       if(!id) throw new Error('No booking_id')
-      const r2=await axios.post(`${API.replace(/\/$/,'')}/api/payments/checkout`,{booking_id:id})
-      const url=r2.data?.url; if(!url) throw new Error('No checkout url')
 
-      try{ window.location.assign(url); return }catch{}
-      const a=document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener'; document.body.appendChild(a); a.click(); a.remove()
+      // 2) Request a PaymentIntent for the deposit (no redirect)
+      const r2=await axios.post(`${API.replace(/\/$/,'')}/api/payments/intent`,{ booking_id:id })
+      const secret=r2.data?.clientSecret
+      if(!secret) throw new Error('No clientSecret')
+
+      setClientSecret(secret)
+      setShowPayment(true)
+      // Leave submitting=false so the Pay button is enabled inside the payment box
     }catch(err){
       console.error(err)
       alert(err?.response?.data?.error||err?.message||'Error')
@@ -185,14 +197,68 @@ export default function BookingForm(){
             ))}
           </div>
         </div>
+
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'#111',border:'1px solid #D4AF3766',borderRadius:12,padding:12}}>
           <div style={{fontSize:14}}>{t('total')}: <strong>€{(amount_total/100).toFixed(2)}</strong> • {t('deposit')}: <strong>€{(amount_deposit/100).toFixed(2)}</strong></div>
           <button className='btn' type='submit' disabled={submitting}
             style={{background:ACCENT,color:'#000',padding:'8px 12px',borderRadius:12,fontWeight:700,boxShadow:`0 0 0 1px ${ACCENT} inset`}}>
-            {submitting?'Loading payment…':t('pay_and_book')}
+            {submitting?'Loading…':t('pay_and_book')}
           </button>
         </div>
       </form>
+
+      {/* Inline payment box */}
+      {showPayment && clientSecret && (
+        <div style={{background:'#0b0b0b',border:'1px solid #D4AF3766',borderRadius:12,padding:16}}>
+          <div style={{marginBottom:8,opacity:.9}}>{t('payment_ready')}</div>
+          <Elements stripe={stripePromise} options={{ clientSecret, appearance:{ theme:'night' } }}>
+            <InlinePayment t={t} onClose={()=>{ setShowPayment(false); setClientSecret('') }} />
+          </Elements>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InlinePayment({ t, onClose }){
+  const stripe = useStripe()
+  const elements = useElements()
+  const [busy,setBusy] = useState(false)
+  const [err,setErr] = useState('')
+  const [done,setDone] = useState(false)
+
+  async function pay(){
+    if(!stripe || !elements) return
+    setErr(''); setBusy(true)
+    const result = await stripe.confirmPayment({
+      elements,
+      confirmParams: { return_url: window.location.href },
+      redirect: 'if_required'
+    })
+    setBusy(false)
+    if (result.error) { setErr(result.error.message || 'Payment failed'); return }
+    setDone(true)
+    // Webhook will mark booking paid & add calendar event
+    // You can close the box automatically after a bit:
+    // setTimeout(onClose, 1500)
+  }
+
+  return (
+    <div style={{display:'grid',gap:12}}>
+      <PaymentElement />
+      {err && <div style={{color:'#ff6b6b',fontSize:13}}>{err}</div>}
+      {done ? (
+        <div style={{color:'#6bff88',fontWeight:700}}>{t('payment_done')}</div>
+      ) : (
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={pay} disabled={!stripe || busy} style={{background:'#C62828',color:'#000',padding:'8px 12px',borderRadius:12,fontWeight:700}}>
+            {busy ? t('paying') : t('pay_now')}
+          </button>
+          <button type="button" onClick={onClose} disabled={busy} style={{background:'#222',color:'#D4AF37',padding:'8px 12px',borderRadius:12}}>
+            {t('cancel')}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
