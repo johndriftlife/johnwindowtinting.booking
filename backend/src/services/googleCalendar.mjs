@@ -9,7 +9,7 @@ function getAuth() {
   if (!clientEmail || !privateKey) {
     throw new Error('Google credentials missing (GOOGLE_CLIENT_EMAIL/GOOGLE_PRIVATE_KEY)')
   }
-  // Render often stores \n as literal backslash-n; convert to real newlines
+  // Render usually stores \n literally; convert to real newlines
   if (privateKey.includes('\\n')) privateKey = privateKey.replace(/\\n/g, '\n')
   return new google.auth.JWT(clientEmail, null, privateKey, SCOPES)
 }
@@ -22,7 +22,7 @@ export async function createCalendarEvent(booking) {
   const calId = process.env.GOOGLE_CALENDAR_ID
   if (!calId) throw new Error('GOOGLE_CALENDAR_ID is missing')
 
-  // booking.date is YYYY-MM-DD, times are "HH:MM"
+  // booking.date is YYYY-MM-DD; times are "HH:MM"
   const startIso = `${booking.date}T${(booking.start_time || '00:00')}:00`
   const endIso   = `${booking.date}T${(booking.end_time || booking.start_time || '00:00')}:00`
 
@@ -31,7 +31,9 @@ export async function createCalendarEvent(booking) {
     `Phone: ${booking.phone || ''}`,
     `Email: ${booking.email || ''}`,
     `Vehicle: ${booking.vehicle || ''}`,
-    `Tint: ${booking.tint_quality} • Shades: ${Array.isArray(booking.tint_shades) ? booking.tint_shades.join(', ') : (booking.tint_shade || '')}`,
+    `Tint: ${booking.tint_quality} • Shades: ${
+      Array.isArray(booking.tint_shades) ? booking.tint_shades.join(', ') : (booking.tint_shade || '')
+    }`,
     `Windows: ${Array.isArray(booking.windows) ? booking.windows.join(', ') : ''}`,
     `Booking ID: ${booking.id}`
   ]
@@ -49,5 +51,5 @@ export async function createCalendarEvent(booking) {
     requestBody: event
   })
 
-  return res.data // includes event id, htmlLink, etc.
+  return res.data // { id, htmlLink, ... }
 }
