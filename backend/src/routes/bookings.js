@@ -1,112 +1,152 @@
 // backend/src/routes/bookings.js
 import express from 'express'
-import { db, saveBookings } from '../store.mjs'
-import { v4 as uuid } from 'uuid'
-import { finalizeBooking } from '../services/finalizeBooking.mjs'
+import { v4 as uuidv4 } from 'uuid'
+import { db, saveBookings } from '../store.mjs' // <-- change to '../store.js' if that's your file
 
 const router = express.Router()
 
-// Prices (cents)
+// ---- PRICES (cents) ----
 const PRICE_VALUES = {
-  carbon: { front_doors: 4000, rear_doors: 4000, front_windshield: 8000, rear_windshield: 8000 },
-  ceramic:{ front_doors: 6000, rear_doors: 6000, front_windshield:10000, rear_windshield:10000 }
+  carbon:   { front_doors: 4000, rear_doors: 4000, front_windshield: 8000,  rear_windshield: 8000 },
+  ceramic:  { front_doors: 6000, rear_doors: 6000, front_windshield: 10000, rear_windshield: 10000 }
 }
 
-// ---- helpers ----
-function weekdayOf(dateStr) { return new Date(dateStr + 'T00:00:00').getUTCDay() } // 0=Sun…6=Sat
-function addHours(hhmm, hours) {
-  const [h, m] = hhmm.split(':').map(Number)
-  const base = new Date(Date.UTC(2000,0,1,h,m||0))
-  base.setUTCHours(base.getUTCHours() + hours)
-  return String(base.getUTCHours()).padStart(2,'0') + ':' + String(base.getUTCMinutes()).padStart(2,'0')
+// ---- Safe, lazy calendar call so the server always boots ----
+async function createCalendarEventSafe(booking) {
+  if (process.env.DISABLE_CALENDAR === 'true') return null
+  try {
+    // Use .mjs or .js to match your file name
+    const mod = await import('../services/googleCalendar.mjs').catch(async () => await import('../services/googleCalendar.js'))
+    if (!mod?.createCalendarEvent && !mod?.addBookingToCalendar) return null
+    // support either exported name
+    const fn = mod.createCalendarEvent || mod.addBookingToCalendar
+    return await fn(booking)
+  } catch (e) {
+    console.error('Calendar module not available:', e?.message || e)
+    return null
+  }
 }
-function endFromStart(start) { return addHours(start, 2) }
 
-// ---- availability ----
+// ---- Helper: compute totals from windows & tint quality ----
+function computeAmounts({ tint_quality = 'carbon', windows = [] }) {
+  const map = PRICE_VALUES[tint_quality] || PRICE_VALUES.carbon
+  const amount_total = windows.reduce((sum, key) => sum + (map[key] || 0), 0)
+  const amount_deposit = Math.floor(amount_total * 0.5) // 50% deposit
+  return { amount_total, amount_deposit }
+}
+
+// ---- GET /availability?date=YYYY-MM-DD (kept simple; uses your stored settings/overrides if present) ----
 router.get('/availability', (req, res) => {
   const { date } = req.query
-  if (!date) return res.status(400).json({ error: 'date required' })
+  if (!date) return res.status(400).json({ error: 'date required as YYYY-MM-DD' })
 
-  const w = weekdayOf(date)
-  const base = db.slots.filter(s => s.weekday === w)
+  // If you persist per-date slot overrides, serve them:
+  const override = db.slot_overrides?.[date]
+  if (override?.slots) {
+    return res.json({ date, slots: override.slots })
+  }
 
-  const bookedStarts = new Set(
-    db.bookings.filter(b => b.date === date && b.status !== 'cancelled').map(b => b.start_time)
-  )
-  const alsoBlocked = new Set()
-  if (w === 6) for (const start of bookedStarts) alsoBlocked.add(addHours(start, 1)) // Saturday rule
+  // Fall back to your generated defaults already in memory (if you keep them)
+  if (db.default_slots_generator) {
+    const slots = db.default_slots_generator(date)
+    return res.json({ date, slots })
+  }
 
-  const slots = base.map(s => {
-    const start = s.start_time
-    const enabled = !!s.enabled && !bookedStarts.has(start) && !alsoBlocked.has(start)
-    return { start, end: endFromStart(start), enabled }
-  })
-
-  res.json({ date, slots })
+  // Minimal default in case nothing else is present (Tue–Fri 14:00; Sat hourly 09–14; Sun 10:00; Mon none)
+  const d = new Date(date + 'T00:00:00')
+  const weekday = ((d.getUTCDay() + 6) % 7) + 1 // 1=Mon..7=Sun
+  let slots = []
+  if (weekday >= 2 && weekday <= 5) { // Tue-Fri
+    slots = [{ start: '14:00', end: '16:00', enabled: true }]
+  } else if (weekday === 6) { // Sat
+    slots = ['09:00','10:00','11:00','12:00','13:00','14:00'].map(s => ({ start: s, end: s, enabled: true }))
+  } else if (weekday === 7) { // Sun
+    slots = [{ start: '10:00', end: '12:00', enabled: true }]
+  }
+  return res.json({ date, slots })
 })
 
-// ---- create booking ---- (accept single or multiple shades)
-router.post('/create', (req, res) => {
-  const {
-    full_name, phone, email, vehicle,
-    tint_quality,
-    tint_shade,          // optional single
-    tint_shades,         // optional array
-    windows, date, start_time, end_time
-  } = req.body || {}
-
-  const shadesArray =
-    Array.isArray(tint_shades) ? tint_shades :
-    (typeof tint_shade === 'string' && tint_shade.trim() ? [tint_shade.trim()] : [])
-
-  if (
-    !full_name || !phone || !email || !vehicle ||
-    !tint_quality || !Array.isArray(windows) ||
-    !date || !start_time || !end_time ||
-    shadesArray.length === 0
-  ) return res.status(400).json({ error: 'missing fields' })
-
-  const w = weekdayOf(date)
-  const slotDef = db.slots.find(s => s.weekday === w && s.start_time === start_time)
-  if (!slotDef || !slotDef.enabled) return res.status(400).json({ error: 'time slot not available' })
-
-  const conflict = db.bookings.find(
-    b => b.date === date && b.start_time === start_time && b.status !== 'cancelled'
-  )
-  if (conflict) return res.status(409).json({ error: 'time already booked' })
-
-  const values = PRICE_VALUES[tint_quality] || {}
-  const total = windows.reduce((sum, wkey) => sum + (values[wkey] || 0), 0)
-  const deposit = Math.floor(total * 0.5)
-
-  const id = uuid()
-  db.bookings.push({
-    id,
-    full_name, phone, email, vehicle,
-    tint_quality,
-    tint_shades_json: JSON.stringify(shadesArray),
-    windows_json: JSON.stringify(windows),
-    date, start_time, end_time,
-    amount_total: total,
-    amount_deposit: deposit,
-    status: 'pending_payment',
-    payment_intent_id: null,
-    google_event_id: null
-  })
-
-  // IMPORTANT FOR AUTO-FINALIZE:
-  // When you create the Stripe PaymentIntent/Checkout Session, include metadata: { booking_id: id }
-  res.json({ booking_id: id, amount_total: total, amount_deposit: deposit })
-})
-
-// ---- manual finalize (kept for testing) ----
-router.post('/finalize', async (req, res) => {
-  const { booking_id, payment_intent_id } = req.body || {}
+// ---- POST /create  -> creates booking, saves, and AUTO-ADDS to Google Calendar ----
+router.post('/create', async (req, res) => {
   try {
-    const b = await finalizeBooking({ db, saveBookings }, { booking_id, payment_intent_id })
-    res.json({ ok: true, google_event_id: b.google_event_id })
+    const {
+      full_name = '',
+      phone = '',
+      email = '',
+      vehicle = '',
+      tint_quality = 'carbon',
+      tint_shade,              // string (mobile) OR
+      tint_shades,             // array (desktop multi-select)
+      windows = [],
+      date,
+      start_time,
+      end_time
+    } = req.body || {}
+
+    if (!date) return res.status(400).json({ error: 'date required' })
+    if (!start_time) return res.status(400).json({ error: 'start_time required' })
+    if (!windows || !Array.isArray(windows) || windows.length === 0) {
+      return res.status(400).json({ error: 'at least one window is required' })
+    }
+
+    // Normalize shade(s)
+    let shades = []
+    if (Array.isArray(tint_shades)) shades = tint_shades
+    else if (tint_shade) shades = [tint_shade]
+
+    // Compute money
+    const { amount_total, amount_deposit } = computeAmounts({ tint_quality, windows })
+
+    const booking = {
+      id: uuidv4(),
+      created_at: new Date().toISOString(),
+      status: 'pending',
+      payment_status: 'unpaid',
+      date,
+      start_time,
+      end_time: end_time || start_time, // your UI often uses single time; keep same if missing
+      full_name,
+      phone,
+      email,
+      vehicle,
+      tint_quality,
+      tint_shade: shades.length === 1 ? shades[0] : undefined,
+      tint_shades: shades.length > 1 ? shades : undefined,
+      windows,
+      amount_total,
+      amount_deposit
+    }
+
+    // Persist
+    db.bookings = db.bookings || []
+    db.bookings.push(booking)
+    await saveBookings()
+
+    // Fire-and-forget calendar creation (don’t block the response if it fails)
+    createCalendarEventSafe(booking)
+      .then(ev => {
+        if (ev?.id) {
+          booking.calendar_event_id = ev.id
+          booking.calendar_link = ev.htmlLink
+          return saveBookings()
+        }
+      })
+      .catch(() => {})
+
+    // Return to client
+    res.json({
+      id: booking.id,
+      date: booking.date,
+      start_time: booking.start_time,
+      end_time: booking.end_time,
+      amount_total: booking.amount_total,
+      amount_deposit: booking.amount_deposit,
+      status: booking.status,
+      payment_status: booking.payment_status
+    })
   } catch (e) {
-    res.status(400).json({ error: e?.message || 'finalize failed' })
+    console.error('Create booking error:', e?.message || e)
+    res.status(500).json({ error: 'failed to create booking' })
   }
 })
 
