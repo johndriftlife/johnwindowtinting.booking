@@ -2,8 +2,7 @@
 import express from 'express'
 import Stripe from 'stripe'
 import dotenv from 'dotenv'
-import { db, saveBookings } from '../store.mjs' // change to '../store.js' if your store is .js
-import { createCalendarEvent } from '../services/googleCalendar.mjs'
+import { db, saveBookings } from '../store.mjs' // <-- change to '../store.js' if your file is .js
 
 dotenv.config()
 
@@ -11,16 +10,30 @@ const router = express.Router()
 const stripeKey = process.env.STRIPE_SECRET_KEY || ''
 const stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' })
 
+// ---------- helpers ----------
 function getFrontendBase(req) {
   return process.env.FRONTEND_URL || process.env.PUBLIC_FRONTEND_URL || req.headers.origin || ''
 }
-
 function findBooking(booking_id) {
   return db.bookings.find(x => x.id === booking_id)
 }
-
 function getBookingId(req) {
+  // support POST (body) and GET (query)
   return (req.body && req.body.booking_id) || req.query.booking_id || req.query.b
+}
+
+// Lazy/defensive Google Calendar import so the app always boots
+async function createCalendarEventSafe(booking) {
+  if (process.env.DISABLE_CALENDAR === 'true') return null
+  try {
+    // if you created googleCalendar.js instead, change the path below
+    const mod = await import('../services/googleCalendar.mjs')
+    if (!mod?.createCalendarEvent) return null
+    return await mod.createCalendarEvent(booking)
+  } catch (e) {
+    console.error('Calendar module not available:', e?.message || e)
+    return null
+  }
 }
 
 async function finalizePaid(booking, payment_intent_id) {
@@ -28,11 +41,12 @@ async function finalizePaid(booking, payment_intent_id) {
   booking.payment_intent_id = payment_intent_id
   booking.status = 'deposit_paid'
   try {
-    // Create Calendar event (only once)
     if (!booking.calendar_event_id) {
-      const ev = await createCalendarEvent(booking)
-      booking.calendar_event_id = ev.id
-      booking.calendar_link = ev.htmlLink
+      const ev = await createCalendarEventSafe(booking)
+      if (ev?.id) {
+        booking.calendar_event_id = ev.id
+        booking.calendar_link = ev.htmlLink
+      }
     }
   } catch (err) {
     console.error('Calendar create failed:', err?.message || err)
@@ -40,7 +54,7 @@ async function finalizePaid(booking, payment_intent_id) {
   await saveBookings()
 }
 
-// ---------- WEBHOOK (raw body) ----------
+// ---------- WEBHOOK FIRST (raw body) ----------
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   try {
     const sig = req.headers['stripe-signature']
@@ -88,7 +102,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 router.use(express.json())
 
 // ---------- RECOMMENDED: Stripe Checkout ----------
-router.post('/checkout', async (req, res) => {
+async function handleCheckout(req, res) {
   try {
     if (!stripeKey) return res.status(500).json({ error: 'STRIPE_SECRET_KEY not configured' })
 
@@ -132,22 +146,12 @@ router.post('/checkout', async (req, res) => {
     console.error('Checkout error:', msg)
     res.status(500).json({ error: msg })
   }
-})
-
-// Optional GET compatibility (so a plain link still works)
-router.get('/checkout', async (req, res) => {
-  // Redirect the browser to the Checkout url if possible
-  req.body = { booking_id: getBookingId(req) }
-  const jsonSend = res.json.bind(res)
-  res.json = (data) => {
-    if (data?.url) return res.redirect(data.url)
-    return jsonSend(data)
-  }
-  return router.handle({ ...req, method: 'POST', url: '/checkout' }, res)
-})
+}
+router.post('/checkout', handleCheckout)
+router.get('/checkout', handleCheckout) // GET compatibility & manual testing
 
 // ---------- COMPAT: create-payment-intent for old code ----------
-router.post('/create-payment-intent', async (req, res) => {
+async function handleCreatePI(req, res) {
   try {
     if (!stripeKey) return res.status(500).json({ error: 'STRIPE_SECRET_KEY not configured' })
 
@@ -173,12 +177,8 @@ router.post('/create-payment-intent', async (req, res) => {
     console.error('PI error:', msg)
     res.status(500).json({ error: msg })
   }
-})
-
-// Optional GET compatibility for create-payment-intent
-router.get('/create-payment-intent', async (req, res) => {
-  req.body = { booking_id: getBookingId(req) }
-  return router.handle({ ...req, method: 'POST', url: '/create-payment-intent' }, res)
-})
+}
+router.post('/create-payment-intent', handleCreatePI)
+router.get('/create-payment-intent', handleCreatePI) // GET compatibility
 
 export default router
