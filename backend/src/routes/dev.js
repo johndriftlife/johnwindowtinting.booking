@@ -4,13 +4,16 @@ import { google } from 'googleapis'
 
 const router = express.Router()
 
+// quick sanity endpoint so you can test routing without Google
+router.get('/ping', (req, res) => res.json({ ok: true, msg: 'dev router mounted' }))
+
 function getJwt() {
   const clientEmail = process.env.GOOGLE_CLIENT_EMAIL
   let privateKey = process.env.GOOGLE_PRIVATE_KEY
   if (!clientEmail || !privateKey) {
     throw new Error('Missing GOOGLE_CLIENT_EMAIL or GOOGLE_PRIVATE_KEY')
   }
-  // Support \n-escaped format from env
+  // Render env often stores newlines as "\n"
   privateKey = privateKey.replace(/\\n/g, '\n')
 
   return new google.auth.JWT({
@@ -28,24 +31,19 @@ router.get('/calendar-ping', async (req, res) => {
     const auth = getJwt()
     const calendar = google.calendar({ version: 'v3', auth })
 
-    const start = new Date(Date.now() + 2 * 60 * 1000) // 2 minutes from now
-    const end = new Date(start.getTime() + 10 * 60 * 1000) // +10 minutes
+    const start = new Date(Date.now() + 2 * 60 * 1000)
+    const end = new Date(start.getTime() + 10 * 60 * 1000)
 
-    // Try to create a tiny test event
-    const create = await calendar.events.insert({
+    const created = await calendar.events.insert({
       calendarId,
       requestBody: {
-        summary: 'Test from API (will auto-delete)',
+        summary: 'API test (auto-delete)',
         start: { dateTime: start.toISOString() },
         end: { dateTime: end.toISOString() },
       },
     })
 
-    const eventId = create.data.id
-
-    // Clean up: delete it right away
-    await calendar.events.delete({ calendarId, eventId })
-
+    await calendar.events.delete({ calendarId, eventId: created.data.id })
     return res.json({ ok: true, message: 'Calendar write OK (insert+delete succeeded)' })
   } catch (err) {
     console.error('calendar-ping error:', err?.response?.data || err?.message || err)
