@@ -1,4 +1,3 @@
-// backend/src/store.mjs
 import { v4 as uuid } from 'uuid'
 
 export const db = {
@@ -37,13 +36,9 @@ export function addBooking(payload) {
   db.bookings.push(rec)
   return rec
 }
+export function markPaid(bookingId) { const b = db.bookings.find(x => x.id === bookingId); if (b) b.status = 'paid'; return b }
+export function getBookingsForDate(dateStr) { return db.bookings.filter(b => b.date === dateStr) }
 
-export function markPaid(bookingId) {
-  const b = db.bookings.find(x => x.id === bookingId)
-  if (b) b.status = 'paid'
-  return b
-}
-
-export function getBookingsForDate(dateStr) {
-  return db.bookings.filter(b => b.date === dateStr)
-}
+// no-op stubs (avoid import errors from old code)
+export function saveShades(){ return true }
+export function saveSlots(){ return true }
