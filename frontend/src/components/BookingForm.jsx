@@ -9,143 +9,33 @@ const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 
 const ACCENT = '#C62828'
 const API = import.meta.env.VITE_API_BASE
 
-const DICT = {
-  en: {
-    book_title:'Book an Appointment', date:'Date', time:'Time', full_name:'Full name',
-    phone:'Phone', email:'Email address', vehicle:'Vehicle', tint_quality:'Tint Quality',
-    tint_shades:'Tint Shades', windows_to_work:'Windows To Work On', carbon_tint:'Carbon Tint',
-    ceramic_tint:'Ceramic Tint', select_time:'Select time', not_available:'Not available',
-    total:'Total', deposit:'Deposit (50%)', pay_and_book:'Pay Deposit & Book Appointment',
-    pay_now:'Pay Now', paying:'Processing…', cancel:'Cancel',
-    payment_ready:'Enter your card to pay deposit',
-    payment_done:'Payment received! Your booking is confirmed.',
-    payment_error:'Payment form failed to load. Please refresh.'
-  },
-  fr: {
-    book_title:'Prendre un rendez-vous', date:'Date', time:'Heure', full_name:'Nom complet',
-    phone:'Téléphone', email:'Adresse e-mail', vehicle:'Véhicule', tint_quality:'Qualité du film',
-    tint_shades:'Teintes', windows_to_work:'Vitres à traiter', carbon_tint:'Film Carbone',
-    ceramic_tint:'Film Céramique', select_time:'Choisir une heure', not_available:'Indisponible',
-    total:'Total', deposit:'Acompte (50%)', pay_and_book:'Payer l’acompte et réserver',
-    pay_now:'Payer maintenant', paying:'Traitement…', cancel:'Annuler',
-    payment_ready:'Entrez votre carte pour payer l’acompte',
-    payment_done:'Paiement reçu ! Votre rendez-vous est confirmé.',
-    payment_error:'Le formulaire de paiement n’a pas pu charger. Rechargez la page.'
-  }
-}
-
-function useI18n(){
-  const [lang,setLang]=useState(()=>localStorage.getItem('lang')||'en')
-  useEffect(()=>{ localStorage.setItem('lang',lang); document.documentElement.setAttribute('lang',lang) },[lang])
-  const t=(k)=>(DICT[lang]||DICT.en)[k]||k
-  return {lang,setLang,t}
-}
-
-function Flag({code}){
-  const style={display:'inline-block',width:20,height:14,borderRadius:2,overflow:'hidden',boxShadow:'0 0 0 1px #0006 inset'}
-  if(code==='fr'){
-    return (
-      <svg viewBox="0 0 3 2" style={style} aria-hidden="true">
-        <rect width="1" height="2" x="0" fill="#0055A4"/>
-        <rect width="1" height="2" x="1" fill="#fff"/>
-        <rect width="1" height="2" x="2" fill="#EF4135"/>
-      </svg>
-    )
-  }
-  return (
-    <svg viewBox="0 0 190 100" style={style} aria-hidden="true">
-      <rect width="190" height="100" fill="#B22234"/>
-      {[...Array(6)].map((_,i)=>(<rect key={i} y={i*16+8} width="190" height="8" fill="#fff"/>))}
-      <rect width="76" height="56" fill="#3C3B6E"/>
-    </svg>
-  )
-}
-
-function LanguageSwitcher({lang,setLang}){
-  const [open,setOpen]=useState(false)
-  const current=lang==='fr'?{code:'fr',label:'Français'}:{code:'en',label:'English'}
-  const items=[{code:'en',label:'English'},{code:'fr',label:'Français'}]
-  return (
-    <div style={{position:'relative',display:'inline-block'}}>
-      <button type='button' onClick={()=>setOpen(o=>!o)}
-        style={{display:'inline-flex',alignItems:'center',gap:8,background:'#111',border:`1px solid ${ACCENT}66`,borderRadius:12,color:'#D4AF37',padding:'8px 12px'}}>
-        <Flag code={current.code} /><span style={{fontSize:12}}>{current.label}</span>
-      </button>
-      {open&&(
-        <div style={{position:'absolute',zIndex:50,top:'110%',left:0,background:'#111',border:`1px solid ${ACCENT}66`,borderRadius:12,overflow:'hidden'}}>
-          {items.map(it=>(
-            <div key={it.code} onClick={()=>{setLang(it.code);setOpen(false)}}
-              style={{display:'flex',gap:8,alignItems:'center',padding:'8px 10px',cursor:'pointer',color:'#D4AF37'}}>
-              <Flag code={it.code} /><span style={{fontSize:12}}>{it.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function AdminSecretLogo({src,alt}){
-  const [count,setCount]=useState(0)
-  useEffect(()=>{ if(!count) return; const t=setTimeout(()=>setCount(0),1500); return ()=>clearTimeout(t) },[count])
-  const onClick=()=>{
-    const n=count+1; setCount(n)
-    if(n>=3){
-      setCount(0)
-      const key=window.prompt('Enter admin key:'); if(!key) return
-      if(key===import.meta.env.VITE_ADMIN_KEY){ window.location.hash='#/admin' }
-      else { alert('Invalid key') }
-    }
-  }
-  return <img src={src} alt={alt} onClick={onClick} style={{height:160,width:'auto',borderRadius:12,cursor:'pointer',display:'block',margin:'0 auto'}}/>
-}
-
-const PRICE_LABELS={
-  carbon:{front_doors:'Front Doors €40',rear_doors:'Rear Doors €40',front_windshield:'Front Windshield €80',rear_windshield:'Rear Windshield €80'},
-  ceramic:{front_doors:'Front Doors €60',rear_doors:'Rear Doors €60',front_windshield:'Front Windshield €100',rear_windshield:'Rear Windshield €100'}
-}
-const PRICE_VALUES={
-  carbon:{front_doors:4000,rear_doors:4000,front_windshield:8000,rear_windshield:8000},
-  ceramic:{front_doors:6000,rear_doors:6000,front_windshield:10000,rear_windshield:10000}
-}
+const DICT={ en:{book_title:'Book an Appointment',date:'Date',time:'Time',full_name:'Full name',phone:'Phone',email:'Email address',vehicle:'Vehicle',tint_quality:'Tint Quality',tint_shades:'Tint Shades',windows_to_work:'Windows To Work On',carbon_tint:'Carbon Tint',ceramic_tint:'Ceramic Tint',select_time:'Select time',not_available:'Not available',total:'Total',deposit:'Deposit (50%)',pay_and_book:'Pay Deposit & Book Appointment',pay_now:'Pay Now',paying:'Processing…',cancel:'Cancel',payment_ready:'Enter your card to pay deposit',payment_done:'Payment received!',payment_error:'Payment form failed to load.'}, fr:{book_title:'Prendre un rendez-vous',date:'Date',time:'Heure',full_name:'Nom complet',phone:'Téléphone',email:'Adresse e-mail',vehicle:'Véhicule',tint_quality:'Qualité du film',tint_shades:'Teintes',windows_to_work:'Vitres à traiter',carbon_tint:'Film Carbone',ceramic_tint:'Film Céramique',select_time:'Choisir une heure',not_available:'Indisponible',total:'Total',deposit:'Acompte (50%)',pay_and_book:'Payer l’acompte et réserver',pay_now:'Payer maintenant',paying:'Traitement…',cancel:'Annuler',payment_ready:'Entrez votre carte pour payer l’acompte',payment_done:'Paiement reçu !',payment_error:'Le formulaire de paiement n’a pas pu charger.'} }
+function useI18n(){ const [lang,setLang]=useState(()=>localStorage.getItem('lang')||'en'); useEffect(()=>{ localStorage.setItem('lang',lang);document.documentElement.setAttribute('lang',lang)},[lang]); const t=(k)=>(DICT[lang]||DICT.en)[k]||k; return {lang,setLang,t} }
+function Flag({code}){ const style={display:'inline-block',width:20,height:14,borderRadius:2,overflow:'hidden',boxShadow:'0 0 0 1px #0006 inset'}; if(code==='fr'){ return (<svg viewBox="0 0 3 2" style={style}><rect width="1" height="2" x="0" fill="#0055A4"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#EF4135"/></svg>) } return (<svg viewBox="0 0 190 100" style={style}><rect width="190" height="100" fill="#B22234"/>{[...Array(6)].map((_,i)=>(<rect key={i} y={i*16+8} width="190" height="8" fill="#fff"/>))}<rect width="76" height="56" fill="#3C3B6E"/></svg>) }
+function LanguageSwitcher({lang,setLang}){ const [open,setOpen]=useState(false); const current=lang==='fr'?{code:'fr',label:'Français'}:{code:'en',label:'English'}; const items=[{code:'en',label:'English'},{code:'fr',label:'Français'}]; return (<div style={{position:'relative',display:'inline-block'}}><button type='button' onClick={()=>setOpen(o=>!o)} style={{display:'inline-flex',alignItems:'center',gap:8,background:'#111',border:`1px solid ${ACCENT}66`,borderRadius:12,color:'#D4AF37',padding:'8px 12px'}}><Flag code={current.code}/><span style={{fontSize:12}}>{current.label}</span></button>{open&&(<div style={{position:'absolute',zIndex:50,top:'110%',left:0,background:'#111',border:`1px solid ${ACCENT}66`,borderRadius:12,overflow:'hidden'}}>{items.map(it=>(<div key={it.code} onClick={()=>{setLang(it.code);setOpen(false)}} style={{display:'flex',gap:8,alignItems:'center',padding:'8px 10px',cursor:'pointer',color:'#D4AF37'}}><Flag code={it.code}/><span style={{fontSize:12}}>{it.label}</span></div>))}</div>)}</div>) }
+function AdminSecretLogo({src,alt}){ const [count,setCount]=useState(0); useEffect(()=>{ if(!count) return; const t=setTimeout(()=>setCount(0),1200); return ()=>clearTimeout(t) },[count]); const onClick=()=>{ const n=count+1; setCount(n); if(n>=3){ setCount(0); const key=window.prompt('Enter admin key:'); if(!key) return; if(key===import.meta.env.VITE_ADMIN_KEY){ window.location.hash='#/admin' } else { alert('Invalid key') } } }; return <img src={src} alt={alt} onClick={onClick} style={{height:160,width:'auto',borderRadius:12,cursor:'pointer',display:'block',margin:'0 auto'}}/> }
+const PRICE_LABELS={carbon:{front_doors:'Front Doors €40',rear_doors:'Rear Doors €40',front_windshield:'Front Windshield €80',rear_windshield:'Rear Windshield €80'},ceramic:{front_doors:'Front Doors €60',rear_doors:'Rear Doors €60',front_windshield:'Front Windshield €100',rear_windshield:'Rear Windshield €100'}}
+const PRICE_VALUES={carbon:{front_doors:4000,rear_doors:4000,front_windshield:8000,rear_windshield:8000},ceramic:{front_doors:6000,rear_doors:6000,front_windshield:10000,rear_windshield:10000}}
 
 export default function BookingForm(){
   const {lang,setLang,t}=useI18n()
   const [date,setDate]=useState(''); const [slots,setSlots]=useState([]); const [slot,setSlot]=useState(null)
-  const [slotsLoading,setSlotsLoading]=useState(false); const [slotsError,setSlotsError]=useState('')
+  const [slotsLoading,setSlotsLoading]=useState(false)
   const [full_name,setFullName]=useState(''); const [phone,setPhone]=useState(''); const [email,setEmail]=useState(''); const [vehicle,setVehicle]=useState('')
   const [tint_quality,setQuality]=useState('carbon'); const [availableShades,setAvailableShades]=useState([]); const [tint_shades,setTintShades]=useState([])
   const [windows,setWindows]=useState([]); const [submitting,setSubmitting]=useState(false)
 
-  // Payment Element state
-  const [clientSecret, setClientSecret] = useState('')
-  const [showPayment, setShowPayment] = useState(false)
-  const [paymentLoadErr, setPaymentLoadErr] = useState('')
+  const [clientSecret,setClientSecret]=useState(''); const [showPayment,setShowPayment]=useState(false); const [paymentLoadErr,setPaymentLoadErr]=useState('')
 
-  useEffect(()=>{
-    if(!date){ setSlots([]); setSlot(null); setSlotsError(''); return }
-    setSlotsLoading(true); setSlotsError('')
-    axios.get(`${API?.replace(/\/$/,'')}/api/bookings/availability`,{params:{date}})
-      .then(r=>{ setSlots(r.data.slots||[]); setSlot(null) })
-      .catch(err=>{ console.error('availability error',err); setSlots([]); setSlotsError('Could not load availability') })
-      .finally(()=>setSlotsLoading(false))
-  },[date])
+  useEffect(()=>{ if(!date){ setSlots([]); setSlot(null); return } setSlotsLoading(true); axios.get(`${API?.replace(/\/$/,'')}/api/bookings/availability`,{params:{date}}).then(r=>{ setSlots(r.data.slots||[]); setSlot(null) }).catch(()=>{ setSlots([]) }).finally(()=>setSlotsLoading(false)) },[date])
 
-  useEffect(()=>{
-    axios.get(`${API?.replace(/\/$/,'')}/api/public/shades`).then(res=>{
-      const list=(res.data&&res.data[tint_quality])? res.data[tint_quality].filter(s=>s.available).map(s=>s.shade):[]
-      if(list.length){ setAvailableShades(list); setTintShades(prev=>prev.filter(x=>list.includes(x))) }
-      else { setAvailableShades(tint_quality==='carbon'?['50%','35%','20%','5%','1%']:['20%','5%']) }
-    }).catch(()=>{ setAvailableShades(tint_quality==='carbon'?['50%','35%','20%','5%','1%']:['20%','5%']) })
-  },[tint_quality])
+  useEffect(()=>{ axios.get(`${API?.replace(/\/$/,'')}/api/public/shades`).then(res=>{ const list=(res.data&&res.data[tint_quality])? res.data[tint_quality].filter(s=>s.available).map(s=>s.shade):[]; if(list.length){ setAvailableShades(list); setTintShades(prev=>prev.filter(x=>list.includes(x))) } else { setAvailableShades(tint_quality==='carbon'?['50%','35%','20%','5%','1%']:['20%','5%']) } }).catch(()=>{ setAvailableShades(tint_quality==='carbon'?['50%','35%','20%','5%','1%']:['20%','5%']) }) },[tint_quality])
 
   const values=PRICE_VALUES[tint_quality], labels=PRICE_LABELS[tint_quality]
-  const amount_total=useMemo(()=>windows.reduce((s,w)=>s+(values[w]||0),0),[windows,values])
-  const amount_deposit=Math.floor(amount_total*0.5)
+  const amount_total=useMemo(()=>windows.reduce((s,w)=>s+(values[w]||0),0),[windows,values]); const amount_deposit=Math.floor(amount_total*0.5)
   const toggleWindow=(k)=> setWindows(p=> p.includes(k)? p.filter(x=>x!==k): [...p,k])
 
-  async function submit(e){
-    e.preventDefault()
+  async function submit(e){ e.preventDefault()
     if(!API) return alert('Missing VITE_API_BASE')
     if(!date) return alert('Choose a date')
     if(!slot) return alert('Choose a time')
@@ -156,147 +46,55 @@ export default function BookingForm(){
     const payload={full_name,phone,email,vehicle,tint_quality,tint_shades,windows,date,start_time:slot.start,end_time:slot.end,amount_total,amount_deposit}
     try{ setSubmitting(true) }catch{}
     try{
-      const r1=await axios.post(`${API.replace(/\/$/,'')}/api/bookings/create`,payload)
-      const id=r1.data?.booking_id; if(!id) throw new Error('No booking_id')
-      const r2=await axios.post(`${API.replace(/\/$/,'')}/api/payments/intent`,{ booking_id:id })
-      const secret=r2.data?.clientSecret; if(!secret) throw new Error('No clientSecret from backend')
+      const r1=await axios.post(`${API.replace(/\/$/,'')}/api/bookings/create`,payload); const id=r1.data?.booking_id; if(!id) throw new Error('No booking_id')
+      const r2=await axios.post(`${API.replace(/\/$/,'')}/api/payments/intent`,{ booking_id:id }); const secret=r2.data?.clientSecret; if(!secret) throw new Error('No clientSecret from backend')
       setClientSecret(secret); setShowPayment(true); setPaymentLoadErr('')
-    }catch(err){ console.error(err); alert(err?.response?.data?.error||err?.message||'Error') }
-    finally{ try{ setSubmitting(false) }catch{} }
+    }catch(err){ console.error(err); alert(err?.response?.data?.error||err?.message||'Error') } finally { try{ setSubmitting(false) }catch{} }
   }
 
-  return (
-    <div style={{display:'grid',gap:24}}>
-      <div style={{textAlign:'center',display:'grid',gap:8}}>
-        <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:12}}>
-          <AdminSecretLogo src={logo} alt="logo" />
-          <LanguageSwitcher lang={lang} setLang={setLang} />
-        </div>
-        <h1 style={{color:'#D4AF37',fontSize:28,fontWeight:700}}>{t('book_title')}</h1>
+  return (<div style={{display:'grid',gap:24}}>
+    <div style={{textAlign:'center',display:'grid',gap:8}}>
+      <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:12}}>
+        <AdminSecretLogo src={logo} alt="logo" />
+        <LanguageSwitcher lang={lang} setLang={setLang} />
+      </div>
+      <h1 style={{color:'#D4AF37',fontSize:28,fontWeight:700}}>{t('book_title')}</h1>
+    </div>
+
+    <form onSubmit={submit} style={{display:'grid',gap:16}}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+        <div><label style={{display:'block',marginBottom:6}}>{t('date')}</label><input type='date' value={date} onChange={e=>setDate(e.target.value)} /></div>
+        <div><label style={{display:'block',marginBottom:6}}>{t('time')}</label><select disabled={!date||slotsLoading} value={slot?`${slot.start}-${slot.end}`:''} onChange={e=>{ const v=e.target.value; if(!v) return setSlot(null); const [s,t]=v.split('-'); const chosen=slots.find(x=>x.start===s&&x.end===t); if(!chosen?.enabled) return; setSlot({start:s,end:t}) }}><option value="">{slotsLoading?'Loading…':t('select_time')}</option>{slots.slice().sort((a,b)=>a.start.localeCompare(b.start)).map((s,i)=>(<option key={i} value={`${s.start}-${s.end}`} disabled={!s.enabled}>{s.start}{s.end?` - ${s.end}`:''} {!s.enabled?`(${t('not_available')})`:''}</option>))}</select></div>
+        <div><label style={{display:'block',marginBottom:6}}>{t('full_name')}</label><input value={full_name} onChange={e=>setFullName(e.target.value)} required/></div>
+        <div><label style={{display:'block',marginBottom:6}}>{t('phone')}</label><input value={phone} onChange={e=>setPhone(e.target.value)} required/></div>
+        <div><label style={{display:'block',marginBottom:6}}>{t('email')}</label><input type='email' value={email} onChange={e=>setEmail(e.target.value)} required/></div>
+        <div><label style={{display:'block',marginBottom:6}}>{t('vehicle')}</label><input value={vehicle} onChange={e=>setVehicle(e.target.value)} required/></div>
+        <div><label style={{display:'block',marginBottom:6}}>{t('tint_quality')}</label><select value={tint_quality} onChange={e=>setQuality(e.target.value)}><option value='carbon'>{t('carbon_tint')}</option><option value='ceramic'>{t('ceramic_tint')}</option></select></div>
+        <div><label style={{display:'block',marginBottom:6}}>{t('tint_shades')}</label><div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>{(availableShades||[]).map(sh=>(<label key={sh} style={{display:'flex',gap:8,alignItems:'center'}}><input type='checkbox' checked={tint_shades.includes(sh)} onChange={()=>setTintShades(p=> p.includes(sh)? p.filter(x=>x!==sh): [...p,sh])}/><span>{sh}</span></label>))}</div></div>
       </div>
 
-      <form onSubmit={submit} style={{display:'grid',gap:16}}>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-          <div><label style={{display:'block',marginBottom:6}}>{t('date')}</label><input type='date' value={date} onChange={e=>setDate(e.target.value)} /></div>
-          <div><label style={{display:'block',marginBottom:6}}>{t('time')}</label>
-            <select disabled={!date||slotsLoading} value={slot?`${slot.start}-${slot.end}`:''}
-              onChange={e=>{ const v=e.target.value; if(!v) return setSlot(null); const [s,t]=v.split('-'); const chosen=slots.find(x=>x.start===s&&x.end===t); if(!chosen?.enabled) return; setSlot({start:s,end:t}) }}>
-              <option value="">{slotsLoading?'Loading…':t('select_time')}</option>
-              {slots.slice().sort((a,b)=>a.start.localeCompare(b.start)).map((s,i)=>(
-                <option key={i} value={`${s.start}-${s.end}`} disabled={!s.enabled}>
-                  {s.start}{s.end?` - ${s.end}`:''} {!s.enabled?`(${t('not_available')})`:''}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div><label style={{display:'block',marginBottom:6}}>{t('full_name')}</label><input value={full_name} onChange={e=>setFullName(e.target.value)} required/></div>
-          <div><label style={{display:'block',marginBottom:6}}>{t('phone')}</label><input value={phone} onChange={e=>setPhone(e.target.value)} required/></div>
-          <div><label style={{display:'block',marginBottom:6}}>{t('email')}</label><input type='email' value={email} onChange={e=>setEmail(e.target.value)} required/></div>
-          <div><label style={{display:'block',marginBottom:6}}>{t('vehicle')}</label><input value={vehicle} onChange={e=>setVehicle(e.target.value)} required/></div>
-          <div><label style={{display:'block',marginBottom:6}}>{t('tint_quality')}</label><select value={tint_quality} onChange={e=>setQuality(e.target.value)}><option value='carbon'>{t('carbon_tint')}</option><option value='ceramic'>{t('ceramic_tint')}</option></select></div>
-          <div><label style={{display:'block',marginBottom:6}}>{t('tint_shades')}</label>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>
-              {(availableShades||[]).map(sh=>(
-                <label key={sh} style={{display:'flex',gap:8,alignItems:'center'}}>
-                  <input type='checkbox' checked={tint_shades.includes(sh)} onChange={()=>setTintShades(p=> p.includes(sh)? p.filter(x=>x!==sh): [...p,sh])}/>
-                  <span>{sh}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
+      <div style={{display:'grid',gap:8}}><label style={{display:'block'}}>{t('windows_to_work')}</label><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>{Object.keys(labels).map(k=>(<label key={k} style={{display:'flex',gap:8,alignItems:'center'}}><input type='checkbox' checked={windows.includes(k)} onChange={()=>toggleWindow(k)}/><span>{labels[k]}</span></label>))}</div></div>
 
-        <div style={{display:'grid',gap:8}}>
-          <label style={{display:'block'}}>{t('windows_to_work')}</label>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-            {Object.keys(labels).map(k=>(
-              <label key={k} style={{display:'flex',gap:8,alignItems:'center'}}>
-                <input type='checkbox' checked={windows.includes(k)} onChange={()=>toggleWindow(k)} />
-                <span>{labels[k]}</span>
-              </label>
-            ))}
-          </div>
-        </div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'#111',border:'1px solid #D4AF3766',borderRadius:12,padding:12}}><div style={{fontSize:14}}>{t('total')}: <strong>€{(amount_total/100).toFixed(2)}</strong> • {t('deposit')}: <strong>€{(amount_deposit/100).toFixed(2)}</strong></div><button type='submit' disabled={submitting} style={{background:ACCENT,color:'#000',padding:'8px 12px',borderRadius:12,fontWeight:700,boxShadow:`0 0 0 1px ${ACCENT} inset`}}>{submitting?'Loading…':t('pay_and_book')}</button></div>
+    </form>
 
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'#111',border:'1px solid #D4AF3766',borderRadius:12,padding:12}}>
-          <div style={{fontSize:14}}>{t('total')}: <strong>€{(amount_total/100).toFixed(2)}</strong> • {t('deposit')}: <strong>€{(amount_deposit/100).toFixed(2)}</strong></div>
-          <button type='submit' disabled={submitting}
-            style={{background:ACCENT,color:'#000',padding:'8px 12px',borderRadius:12,fontWeight:700,boxShadow:`0 0 0 1px ${ACCENT} inset`}}>
-            {submitting?'Loading…':t('pay_and_book')}
-          </button>
-        </div>
-      </form>
-
-      {showPayment && clientSecret && (
-        <div style={{background:'#0b0b0b',border:'1px solid #D4AF3766',borderRadius:12,padding:16}}>
-          <div style={{marginBottom:8,opacity:.9}}>{t('payment_ready')}</div>
-          <Elements stripe={stripePromise} options={{ clientSecret, appearance:{ theme:'night' } }} key={clientSecret}>
-            <InlinePayment
-              t={t}
-              onClose={()=>{ setShowPayment(false); setClientSecret('') }}
-              onLoadError={()=>setPaymentLoadErr(t('payment_error'))}
-            />
-          </Elements>
-          {paymentLoadErr && <div style={{color:'#ff6b6b',marginTop:8}}>{paymentLoadErr}</div>}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function InlinePayment({ t, onClose, onLoadError }){
-  const stripe = useStripe()
-  const elements = useElements()
-  const [busy,setBusy] = useState(false)
-  const [err,setErr] = useState('')
-  const [ready,setReady] = useState(false)
-  const [done,setDone] = useState(false)
-
-  useEffect(() => {
-    const id = setTimeout(() => {
-      if (!elements) return
-      try {
-        const el = elements.getElement('payment')
-        if (!el) onLoadError?.()
-      } catch { onLoadError?.() }
-    }, 1500)
-    return () => clearTimeout(id)
-  }, [elements, onLoadError])
-
-  const pay = async () => {
-    if (!stripe || !elements) return
-    setErr(''); setBusy(true)
-    const result = await stripe.confirmPayment({
-      elements,
-      confirmParams: { return_url: window.location.href },
-      redirect: 'if_required'
-    })
-    setBusy(false)
-    if (result.error) { setErr(result.error.message || 'Payment failed'); return }
-    setDone(true)
-  }
-
-  return (
-    <div style={{display:'grid',gap:12}}>
-      <div style={{minHeight:80,display:'grid',alignItems:'center'}}>
-        <PaymentElement onReady={()=>setReady(true)} />
-      </div>
-      {!ready && <div style={{fontSize:13,opacity:.7}}>Loading secure card form…</div>}
-      {err && <div style={{color:'#ff6b6b',fontSize:13}}>{err}</div>}
-      {done ? (
-        <div style={{color:'#6bff88',fontWeight:700}}>{t('payment_done')}</div>
-      ) : (
-        <div style={{display:'flex',gap:8}}>
-          <button onClick={pay} disabled={!stripe || !elements || !ready || busy}
-            style={{background:ACCENT,color:'#000',padding:'8px 12px',borderRadius:12,fontWeight:700}}>
-            {busy ? t('paying') : t('pay_now')}
-          </button>
-          <button type="button" onClick={onClose} disabled={busy}
-            style={{background:'#222',color:'#D4AF37',padding:'8px 12px',borderRadius:12}}>
-            {t('cancel')}
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
+    {showPayment && clientSecret && (<div style={{background:'#0b0b0b',border:'1px solid #D4AF3766',borderRadius:12,padding:16}}>
+      <div style={{marginBottom:8,opacity:.9}}>{t('payment_ready')}</div>
+      <Elements stripe={stripePromise} options={{ clientSecret, appearance:{ theme:'night' } }} key={clientSecret}>
+        <InlinePayment t={t} onClose={()=>{ setShowPayment(false); setClientSecret('') }} onLoadError={()=>setPaymentLoadErr(t('payment_error'))}/>
+      </Elements>
+      {paymentLoadErr && <div style={{color:'#ff6b6b',marginTop:8}}>{paymentLoadErr}</div>}
+    </div>)}
+  </div>) }
+function InlinePayment({ t, onClose, onLoadError }){ const stripe=useStripe(); const elements=useElements(); const [busy,setBusy]=useState(false); const [err,setErr]=useState(''); const [ready,setReady]=useState(false); const [done,setDone]=useState(false)
+  useEffect(()=>{ const id=setTimeout(()=>{ if(!elements) return; try{ const el=elements.getElement('payment'); if(!el) onLoadError?.() }catch{ onLoadError?.() } },1500); return ()=>clearTimeout(id) },[elements,onLoadError])
+  const pay=async()=>{ if(!stripe||!elements) return; setErr(''); setBusy(true); const result=await stripe.confirmPayment({ elements, confirmParams:{ return_url: window.location.href }, redirect:'if_required' }); setBusy(false); if(result.error){ setErr(result.error.message||'Payment failed'); return } setDone(true) }
+  return (<div style={{display:'grid',gap:12}}>
+    <div style={{minHeight:80,display:'grid',alignItems:'center'}}><PaymentElement onReady={()=>setReady(true)} /></div>
+    {!ready&&<div style={{fontSize:13,opacity:.7}}>Loading secure card form…</div>}
+    {err&&<div style={{color:'#ff6b6b',fontSize:13}}>{err}</div>}
+    {done?(<div style={{color:'#6bff88',fontWeight:700}}>{t('payment_done')}</div>):(<div style={{display:'flex',gap:8}}>
+      <button onClick={pay} disabled={!stripe||!elements||!ready||busy} style={{background:ACCENT,color:'#000',padding:'8px 12px',borderRadius:12,fontWeight:700}}>{busy?t('paying'):t('pay_now')}</button>
+      <button type="button" onClick={onClose} disabled={busy} style={{background:'#222',color:'#D4AF37',padding:'8px 12px',borderRadius:12}}>{t('cancel')}</button>
+    </div>)}
+  </div>) }
